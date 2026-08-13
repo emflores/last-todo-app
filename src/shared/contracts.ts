@@ -198,6 +198,7 @@ export const IPC_CHANNELS = {
   openUpdateDownload: 'updates:open-download',
   getOnboardingStatus: 'onboarding:status',
   completeOnboarding: 'onboarding:complete',
+  setOnboardingComplete: 'onboarding:set-complete',
   reportRendererError: 'diagnostics:renderer-error',
 } as const;
 
@@ -230,4 +231,5 @@ export interface TodoAPI {
   openUpdateDownload(): Promise<void>;
   getOnboardingStatus(): Promise<{ complete: boolean }>;
   completeOnboarding(): Promise<void>;
+  setOnboardingComplete(complete: boolean): Promise<void>;
 }

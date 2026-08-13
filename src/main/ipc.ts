@@ -105,6 +105,10 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.completeOnboarding, () =>
     settings.completeOnboarding(),
   );
+  ipcMain.handle(
+    IPC_CHANNELS.setOnboardingComplete,
+    (_event, complete: boolean) => settings.setOnboardingComplete(complete),
+  );
 
   ipcMain.removeAllListeners(IPC_CHANNELS.reportRendererError);
   ipcMain.on(IPC_CHANNELS.reportRendererError, (_event, value: unknown) => {

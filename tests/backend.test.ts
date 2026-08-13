@@ -272,6 +272,8 @@ describe('settings', () => {
     settings.completeOnboarding();
 
     expect(new SettingsStore(settingsPath).onboardingComplete).toBe(true);
+    settings.setOnboardingComplete(false);
+    expect(new SettingsStore(settingsPath).onboardingComplete).toBe(false);
     fs.rmSync(directory, { recursive: true, force: true });
   });
 });

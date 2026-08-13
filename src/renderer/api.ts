@@ -19,6 +19,7 @@ export interface TodoAPI {
   getAppData(): Promise<AppData>;
   createTodo(input: TodoDraft): Promise<Todo>;
   updateTodo(id: string, input: TodoDraft): Promise<Todo>;
+  rescheduleTodo(id: string, dueDate: string): Promise<Todo>;
   deleteTodo(id: string): Promise<void>;
   setTodoCompleted(id: string, completed: boolean): Promise<Todo>;
   createType(input: { name: string; emoji?: string }): Promise<void>;
@@ -47,6 +48,7 @@ export interface TodoAPI {
   openUpdateDownload(): Promise<void>;
   getOnboardingStatus(): Promise<{ complete: boolean }>;
   completeOnboarding(): Promise<void>;
+  setOnboardingComplete(complete: boolean): Promise<void>;
 }
 
 function bridge(): ContractAPI {
@@ -148,6 +150,9 @@ export const todoApi: TodoAPI = {
       await bridge().updateTodo(id, serializeDraft(input, cachedData)),
     );
   },
+  async rescheduleTodo(id, dueDate) {
+    return normalize(await bridge().updateTodo(id, { dueDate }));
+  },
   deleteTodo: (id) => bridge().deleteTodo(id),
   async setTodoCompleted(id, completed) {
     return normalize(await bridge().setTodoCompleted(id, completed));
@@ -189,4 +194,5 @@ export const todoApi: TodoAPI = {
   openUpdateDownload: () => bridge().openUpdateDownload(),
   getOnboardingStatus: () => bridge().getOnboardingStatus(),
   completeOnboarding: () => bridge().completeOnboarding(),
+  setOnboardingComplete: (complete) => bridge().setOnboardingComplete(complete),
 };

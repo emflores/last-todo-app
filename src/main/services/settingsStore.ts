@@ -31,7 +31,11 @@ export class SettingsStore {
   }
 
   completeOnboarding(): void {
-    this.data.onboardingComplete = true;
+    this.setOnboardingComplete(true);
+  }
+
+  setOnboardingComplete(complete: boolean): void {
+    this.data.onboardingComplete = complete;
     this.save();
   }
 

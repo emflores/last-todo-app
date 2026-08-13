@@ -1,4 +1,12 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  canMoveBetweenLanes,
+  dueDateRange,
+  isDueDateInLane,
+  isReschedulableLane,
+  proposedDueDate,
+  type ReschedulableLane,
+} from '../shared/boardScheduling';
 import type { UpdateStatus } from '../shared/contracts';
 import { todoApi } from './api';
 import lastTodoLogo from './assets/lasttodo-logo.png';
@@ -25,12 +33,26 @@ const EMPTY_DRAFT: TodoDraft = {
 };
 
 type LaneKey = 'overdue' | 'today' | 'week' | 'month' | 'future';
+interface ConfirmationOptions {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  danger?: boolean;
+}
+interface ConfirmationState extends ConfirmationOptions {
+  resolve: (confirmed: boolean) => void;
+}
+interface RescheduleState {
+  todo: Todo;
+  targetLane: ReschedulableLane;
+  proposedDate: string;
+}
 type LayoutMode = 'board' | 'list';
 type StatusFilter = 'active' | 'all' | 'completed';
 type DueFilter = 'any' | LaneKey;
 type PriorityFilter = 'any' | 'high' | 'medium' | 'low' | 'none';
 type SortMode = 'due' | 'priority' | 'created' | 'title';
-type SettingsTab = 'types' | 'labels' | 'backup' | 'updates';
+type SettingsTab = 'types' | 'labels' | 'backup' | 'updates' | 'debug';
 type OnboardingStep = 1 | 2 | 3 | 4;
 type IconName =
   | 'inbox'
@@ -340,6 +362,12 @@ export function App() {
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep | null>(
     null,
   );
+  const [confirmation, setConfirmation] = useState<ConfirmationState | null>(
+    null,
+  );
+  const [draggingTodoId, setDraggingTodoId] = useState<string | null>(null);
+  const [dragOverLane, setDragOverLane] = useState<LaneKey | null>(null);
+  const [reschedule, setReschedule] = useState<RescheduleState | null>(null);
 
   const refresh = async () => {
     try {
@@ -389,6 +417,16 @@ export function App() {
       );
     }
   }, []);
+  const requestConfirmation = useCallback(
+    (options: ConfirmationOptions): Promise<boolean> =>
+      new Promise((resolve) => setConfirmation({ ...options, resolve })),
+    [],
+  );
+  const settleConfirmation = (confirmed: boolean) => {
+    const current = confirmation;
+    setConfirmation(null);
+    current?.resolve(confirmed);
+  };
 
   useEffect(() => {
     void refresh();
@@ -422,6 +460,18 @@ export function App() {
         }
         return;
       }
+      if (confirmation || reschedule) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          if (confirmation) {
+            setConfirmation(null);
+            confirmation.resolve(false);
+          } else {
+            setReschedule(null);
+          }
+        }
+        return;
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') {
         event.preventDefault();
         setQuickParentId(null);
@@ -431,7 +481,7 @@ export function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [finishOnboarding, onboardingStep]);
+  }, [confirmation, finishOnboarding, onboardingStep, reschedule]);
 
   const visibleTodos = useMemo(() => {
     if (showSensitive) return data.todos;
@@ -564,6 +614,44 @@ export function App() {
     setPriorityFilter('any');
     setStatusFilter('active');
     setSortMode('due');
+  };
+  const startTaskDrag = (event: React.DragEvent<HTMLElement>, todo: Todo) => {
+    const sourceLane = laneFor(todo, visibleTodos);
+    const target = event.target as HTMLElement;
+    if (
+      todo.completedAt ||
+      !isReschedulableLane(sourceLane) ||
+      target.closest('button, input, select, textarea, a')
+    ) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', todo.id);
+    setDraggingTodoId(todo.id);
+  };
+  const laneAcceptsDrag = (targetLane: LaneKey): boolean => {
+    const todo = parents.find((candidate) => candidate.id === draggingTodoId);
+    return Boolean(
+      todo && canMoveBetweenLanes(laneFor(todo, visibleTodos), targetLane),
+    );
+  };
+  const dropTask = (
+    event: React.DragEvent<HTMLDivElement>,
+    targetLane: LaneKey,
+  ) => {
+    event.preventDefault();
+    const id = draggingTodoId ?? event.dataTransfer.getData('text/plain');
+    const todo = parents.find((candidate) => candidate.id === id);
+    setDraggingTodoId(null);
+    setDragOverLane(null);
+    if (!todo || !canMoveBetweenLanes(laneFor(todo, visibleTodos), targetLane))
+      return;
+    setReschedule({
+      todo,
+      targetLane,
+      proposedDate: proposedDueDate(targetLane, localISO(new Date())),
+    });
   };
   return (
     <div className="app-shell">
@@ -788,7 +876,27 @@ export function App() {
                 aria-label="Tasks by due date"
               >
                 {LANES.map((lane) => (
-                  <div className={`lane lane-${lane.id}`} key={lane.id}>
+                  <div
+                    className={`lane lane-${lane.id} ${laneAcceptsDrag(lane.id) ? 'lane-drop-available' : ''} ${dragOverLane === lane.id ? 'lane-drag-over' : ''}`}
+                    key={lane.id}
+                    onDragOver={(event) => {
+                      if (!laneAcceptsDrag(lane.id)) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = 'move';
+                      setDragOverLane(lane.id);
+                    }}
+                    onDragLeave={(event) => {
+                      if (
+                        !event.currentTarget.contains(
+                          event.relatedTarget as Node | null,
+                        )
+                      )
+                        setDragOverLane((current) =>
+                          current === lane.id ? null : current,
+                        );
+                    }}
+                    onDrop={(event) => dropTask(event, lane.id)}
+                  >
                     <div className="lane-head">
                       <div>
                         <p>{lane.eyebrow}</p>
@@ -822,6 +930,14 @@ export function App() {
                           }
                           onAddChild={() => openCreate(todo.id)}
                           onEditChild={(child) => setEditing(child)}
+                          draggable={
+                            !todo.completedAt && isReschedulableLane(lane.id)
+                          }
+                          onDragStart={(event) => startTaskDrag(event, todo)}
+                          onDragEnd={() => {
+                            setDraggingTodoId(null);
+                            setDragOverLane(null);
+                          }}
                         />
                       ))}
                       {!lanes[lane.id].length && (
@@ -867,6 +983,7 @@ export function App() {
             checkingUpdates={checkingUpdates}
             onCheckForUpdates={() => void checkForUpdates()}
             onOpenUpdateDownload={() => void openUpdateDownload()}
+            requestConfirmation={requestConfirmation}
           />
         )}
       </main>
@@ -890,19 +1007,23 @@ export function App() {
           }
           onDelete={
             editing
-              ? () =>
-                  mutate(async () => {
-                    const hasChildren = editing.children.length > 0;
-                    if (
-                      !hasChildren ||
-                      window.confirm(
-                        `Delete “${editing.title}”${hasChildren ? ' and all of its child tasks' : ''}? This cannot be undone.`,
-                      )
-                    ) {
-                      await todoApi.deleteTodo(editing.id);
-                      setEditing(undefined);
-                    }
-                  })
+              ? async () => {
+                  const hasChildren = editing.children.length > 0;
+                  if (hasChildren) {
+                    const confirmed = await requestConfirmation({
+                      title: `Delete “${editing.title}”?`,
+                      message:
+                        'This will also delete all of its child tasks. This cannot be undone.',
+                      confirmLabel: 'Delete task',
+                      danger: true,
+                    });
+                    if (!confirmed) return;
+                  }
+                  await mutate(async () => {
+                    await todoApi.deleteTodo(editing.id);
+                    setEditing(undefined);
+                  });
+                }
               : undefined
           }
           onQuickChild={
@@ -926,6 +1047,26 @@ export function App() {
             setOnboardingStep((onboardingStep + 1) as OnboardingStep)
           }
           onFinish={() => void finishOnboarding()}
+        />
+      )}
+      {confirmation && (
+        <ConfirmationModal
+          {...confirmation}
+          onCancel={() => settleConfirmation(false)}
+          onConfirm={() => settleConfirmation(true)}
+        />
+      )}
+      {reschedule && (
+        <RescheduleModal
+          request={reschedule}
+          onClose={() => setReschedule(null)}
+          onConfirm={(dueDate) =>
+            void mutate(async () => {
+              await todoApi.rescheduleTodo(reschedule.todo.id, dueDate);
+              setReschedule(null);
+            })
+          }
+          busy={busy}
         />
       )}
     </div>
@@ -1551,6 +1692,9 @@ function TaskCard({
   onToggleChild,
   onAddChild,
   onEditChild,
+  draggable,
+  onDragStart,
+  onDragEnd,
 }: {
   todo: Todo;
   types: TodoType[];
@@ -1560,6 +1704,9 @@ function TaskCard({
   onToggleChild: (child: Todo) => Promise<void>;
   onAddChild: () => void;
   onEditChild: (child: Todo) => void;
+  draggable: boolean;
+  onDragStart: (event: React.DragEvent<HTMLElement>) => void;
+  onDragEnd: () => void;
 }) {
   const [completing, setCompleting] = useState(false);
   const completeChildren = todo.children.filter(
@@ -1597,6 +1744,9 @@ function TaskCard({
     <article
       className={`task-card priority-card-${priorityLevel} ${todo.completedAt ? 'completed' : ''} ${completing ? 'completing' : ''}`}
       tabIndex={0}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       onClick={onEdit}
       onKeyDown={(event) => {
         if (event.key === 'Enter') onEdit();
@@ -2150,6 +2300,152 @@ function TaskModal({
   );
 }
 
+function ConfirmationModal({
+  title,
+  message,
+  confirmLabel = 'Confirm',
+  danger = false,
+  onCancel,
+  onConfirm,
+}: ConfirmationOptions & {
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      className="modal-backdrop confirmation-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onCancel();
+      }}
+    >
+      <section
+        className="modal confirmation-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirmation-title"
+      >
+        <header>
+          <div>
+            <p className="eyebrow">Please confirm</p>
+            <h2 id="confirmation-title">{title}</h2>
+          </div>
+        </header>
+        <div className="confirmation-copy">{message}</div>
+        <footer>
+          <button type="button" className="secondary" onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={danger ? 'primary danger-confirm' : 'primary'}
+            autoFocus
+            onClick={onConfirm}
+          >
+            {confirmLabel}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function RescheduleModal({
+  request,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  request: RescheduleState;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (dueDate: string) => void;
+}) {
+  const [dueDate, setDueDate] = useState(request.proposedDate);
+  const today = localISO(new Date());
+  const range = dueDateRange(request.targetLane, today);
+  const valid = isDueDateInLane(dueDate, request.targetLane, today);
+  const laneTitle =
+    LANES.find((lane) => lane.id === request.targetLane)?.title ?? 'new lane';
+
+  return (
+    <div
+      className="modal-backdrop reschedule-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy) onClose();
+      }}
+    >
+      <section
+        className="modal reschedule-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reschedule-title"
+      >
+        <header>
+          <div>
+            <p className="eyebrow">Move to {laneTitle}</p>
+            <h2 id="reschedule-title">Change this task’s due date?</h2>
+          </div>
+          <button
+            className="icon-button large"
+            onClick={onClose}
+            aria-label="Close"
+            disabled={busy}
+          >
+            <Icon name="x" />
+          </button>
+        </header>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (valid && !busy) onConfirm(dueDate);
+          }}
+        >
+          <div className="reschedule-copy">
+            <p>
+              Moving <strong>“{request.todo.title}”</strong> into {laneTitle}{' '}
+              updates its due date. We’ve proposed{' '}
+              {request.targetLane === 'future'
+                ? 'the earliest date in that lane.'
+                : 'the end of that scheduling window.'}
+            </p>
+            <label className="field">
+              <span>Proposed new due date</span>
+              <input
+                type="date"
+                value={dueDate}
+                min={range.min}
+                max={range.max}
+                autoFocus
+                onChange={(event) => setDueDate(event.currentTarget.value)}
+              />
+              <small>
+                {range.max
+                  ? `Choose a date from ${niceDate(range.min)} through ${niceDate(range.max)} to keep it in this lane.`
+                  : `Choose ${niceDate(range.min)} or any later date to keep it in this lane.`}
+              </small>
+            </label>
+          </div>
+          <footer>
+            <button
+              type="button"
+              className="secondary"
+              onClick={onClose}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+            <button className="primary" disabled={!valid || busy}>
+              {busy ? 'Moving…' : `Move to ${laneTitle}`}
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function TypeEmojiEditor({
   type,
   busy,
@@ -2187,6 +2483,17 @@ function TypeEmojiEditor({
   );
 }
 
+function FieldHelp({ text }: { text: string }) {
+  return (
+    <span className="field-help" tabIndex={0} aria-label={text}>
+      ?
+      <span className="field-help-tooltip" aria-hidden="true">
+        {text}
+      </span>
+    </span>
+  );
+}
+
 function Settings({
   data,
   busy,
@@ -2200,6 +2507,7 @@ function Settings({
   checkingUpdates,
   onCheckForUpdates,
   onOpenUpdateDownload,
+  requestConfirmation,
 }: {
   data: AppData;
   busy: boolean;
@@ -2213,6 +2521,7 @@ function Settings({
   checkingUpdates: boolean;
   onCheckForUpdates: () => void;
   onOpenUpdateDownload: () => void;
+  requestConfirmation: (options: ConfirmationOptions) => Promise<boolean>;
 }) {
   const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [newType, setNewType] = useState('');
@@ -2224,6 +2533,7 @@ function Settings({
     action: (name: string) => Promise<void>;
   } | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [ftueComplete, setFtueComplete] = useState<boolean | null>(null);
   const [labelForm, setLabelForm] = useState<{
     name: string;
     scope: 'universal' | 'type';
@@ -2288,6 +2598,18 @@ function Settings({
       setRenameTarget(null);
     });
   };
+  useEffect(() => {
+    todoApi
+      .getOnboardingStatus()
+      .then(({ complete }) => setFtueComplete(complete))
+      .catch(() => setFtueComplete(null));
+  }, []);
+  const setFtueState = (complete: boolean) => {
+    void mutate(async () => {
+      await todoApi.setOnboardingComplete(complete);
+      setFtueComplete(complete);
+    });
+  };
   return (
     <section className="settings-page">
       <header className="settings-head">
@@ -2327,6 +2649,12 @@ function Settings({
           >
             Updates
             {updateStatus?.updateAvailable && <span>New</span>}
+          </button>
+          <button
+            className={tab === 'debug' ? 'active' : ''}
+            onClick={() => setTab('debug')}
+          >
+            Debug
           </button>
         </nav>
         <div className="settings-content">
@@ -2371,8 +2699,15 @@ function Settings({
                     <button
                       className="icon-button danger"
                       aria-label={`Delete ${type.name}`}
-                      onClick={() => {
-                        if (window.confirm(`Delete the “${type.name}” type?`))
+                      onClick={async () => {
+                        const confirmed = await requestConfirmation({
+                          title: `Delete the “${type.name}” type?`,
+                          message:
+                            'The type can only be deleted when no tasks or labels use it.',
+                          confirmLabel: 'Delete type',
+                          danger: true,
+                        });
+                        if (confirmed)
                           void mutate(() => todoApi.deleteType(type.id));
                       }}
                     >
@@ -2436,14 +2771,17 @@ function Settings({
                               </button>
                               <button
                                 className="delete-label"
-                                onClick={(event) => {
+                                onClick={async (event) => {
                                   event.preventDefault();
                                   event.stopPropagation();
-                                  if (
-                                    window.confirm(
-                                      `Delete “${label.name}” and its values?`,
-                                    )
-                                  )
+                                  const confirmed = await requestConfirmation({
+                                    title: `Delete “${label.name}”?`,
+                                    message:
+                                      'This will delete the label and all of its values. Labels currently used by tasks cannot be deleted.',
+                                    confirmLabel: 'Delete label',
+                                    danger: true,
+                                  });
+                                  if (confirmed)
                                     void mutate(() =>
                                       todoApi.deleteLabel(label.id),
                                     );
@@ -2543,7 +2881,10 @@ function Settings({
                     />
                   </label>
                   <label className="field">
-                    <span>Visibility</span>
+                    <span className="field-heading">
+                      Visibility
+                      <FieldHelp text="Controls where this label is available. “All task types” shows it on every task; “One task type” only shows it when that type is selected." />
+                    </span>
                     <select
                       value={labelForm.scope}
                       onChange={(event) =>
@@ -2579,7 +2920,10 @@ function Settings({
                     </label>
                   )}
                   <label className="field">
-                    <span>Selection</span>
+                    <span className="field-heading">
+                      Selection
+                      <FieldHelp text="Controls how many values a task can carry for this label. Single allows one choice; multiple allows any number of choices." />
+                    </span>
                     <select
                       value={labelForm.cardinality}
                       onChange={(event) =>
@@ -2594,7 +2938,10 @@ function Settings({
                     </select>
                   </label>
                   <label className="field">
-                    <span>Values</span>
+                    <span className="field-heading">
+                      Values
+                      <FieldHelp text="Controls the kind of choices this label represents. A fixed list is a stable set of options; managed values suit evolving lists such as People. Both are maintained in Settings." />
+                    </span>
                     <select
                       value={labelForm.valueKind}
                       onChange={(event) =>
@@ -2684,12 +3031,15 @@ function Settings({
                     </button>
                     <button
                       className="secondary"
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            'Restore the newest snapshot? Current local changes will be replaced.',
-                          )
-                        ) {
+                      onClick={async () => {
+                        const confirmed = await requestConfirmation({
+                          title: 'Restore the newest snapshot?',
+                          message:
+                            'Your current local database will be replaced by the newest backup. Changes made since that snapshot will be lost.',
+                          confirmLabel: 'Restore snapshot',
+                          danger: true,
+                        });
+                        if (confirmed) {
                           void mutate(async () =>
                             onBackupChange(await todoApi.restoreLatestBackup()),
                           );
@@ -2770,6 +3120,54 @@ function Settings({
               <p className="retention-note">
                 Downloading opens GitHub in your browser. LastTodo never
                 installs updates automatically.
+              </p>
+            </>
+          )}
+          {tab === 'debug' && (
+            <>
+              <div className="content-heading">
+                <div>
+                  <h2>Debug</h2>
+                  <p>Development controls for testing application states.</p>
+                </div>
+              </div>
+              <div className="debug-card">
+                <div>
+                  <h3>First-time user experience</h3>
+                  <p>
+                    Mark the welcome tour as unseen to show it the next time
+                    LastTodo opens.
+                  </p>
+                </div>
+                <div
+                  className="debug-radio-group"
+                  role="radiogroup"
+                  aria-label="First-time user experience state"
+                >
+                  <label>
+                    <input
+                      type="radio"
+                      name="ftue-state"
+                      checked={ftueComplete === true}
+                      disabled={busy || ftueComplete === null}
+                      onChange={() => setFtueState(true)}
+                    />
+                    <span>Seen</span>
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="ftue-state"
+                      checked={ftueComplete === false}
+                      disabled={busy || ftueComplete === null}
+                      onChange={() => setFtueState(false)}
+                    />
+                    <span>Unseen</span>
+                  </label>
+                </div>
+              </div>
+              <p className="retention-note">
+                This takes effect on the next application launch.
               </p>
             </>
           )}

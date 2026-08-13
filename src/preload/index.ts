@@ -53,6 +53,8 @@ const todoAPI = {
   getOnboardingStatus: () =>
     ipcRenderer.invoke(IPC_CHANNELS.getOnboardingStatus),
   completeOnboarding: () => ipcRenderer.invoke(IPC_CHANNELS.completeOnboarding),
+  setOnboardingComplete: (complete: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.setOnboardingComplete, complete),
 } satisfies TodoAPI;
 
 contextBridge.exposeInMainWorld('todoAPI', todoAPI);
