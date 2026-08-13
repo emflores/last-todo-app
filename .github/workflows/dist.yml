@@ -88,7 +88,7 @@ jobs:
             release/*.AppImage
             release/*.deb
             release/*.blockmap
-            release/*.yml
+            release/latest*.yml
           if-no-files-found: error
           retention-days: 14
 
@@ -106,12 +106,35 @@ jobs:
         with:
           path: artifacts
 
-      - name: Create release
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release create "${GITHUB_REF_NAME}"
-          artifacts/**/*
-          --repo "${GITHUB_REPOSITORY}"
-          --generate-notes
-          --verify-tag
+        shell: bash
+        run: |
+          duplicate_names="$(find artifacts -type f -printf '%f\n' | sort | uniq -d)"
+          if [ -n "${duplicate_names}" ]; then
+            echo "Release assets must have unique names:"
+            echo "${duplicate_names}"
+            exit 1
+          fi
+
+          mapfile -d '' release_assets < <(find artifacts -type f -print0)
+          if [ "${#release_assets[@]}" -eq 0 ]; then
+            echo "No release assets were downloaded."
+            exit 1
+          fi
+
+          if ! gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release create "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --draft \
+              --generate-notes \
+              --verify-tag
+          fi
+
+          gh release upload "${GITHUB_REF_NAME}" "${release_assets[@]}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
+          gh release edit "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --draft=false
