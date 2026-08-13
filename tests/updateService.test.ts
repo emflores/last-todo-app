@@ -29,6 +29,7 @@ describe('manual application updates', () => {
       },
       '0.1.0',
       checkedAt,
+      'darwin',
     );
 
     expect(status).toEqual({
@@ -37,6 +38,7 @@ describe('manual application updates', () => {
       updateAvailable: true,
       downloadUrl:
         'https://github.com/emflores/last-todo-app/releases/download/v0.2.0/LastTodo-0.2.0.dmg',
+      downloadLabel: 'DMG',
       checkedAt,
       error: null,
     });
@@ -55,6 +57,7 @@ describe('manual application updates', () => {
       },
       '0.1.0',
       checkedAt,
+      'darwin',
     );
 
     expect(status.updateAvailable).toBe(false);
@@ -62,11 +65,61 @@ describe('manual application updates', () => {
     expect(status.error).toContain('download is not ready');
   });
 
-  it('does not require a DMG when the installed version is current', () => {
+  it('selects a DEB on Linux instead of the macOS asset', () => {
+    const status = updateStatusFromRelease(
+      {
+        tag_name: 'v0.2.0',
+        assets: [
+          {
+            name: 'LastTodo-0.2.0.dmg',
+            browser_download_url:
+              'https://github.com/emflores/last-todo-app/releases/download/v0.2.0/LastTodo-0.2.0.dmg',
+          },
+          {
+            name: 'last-todo_0.2.0_amd64.deb',
+            browser_download_url:
+              'https://github.com/emflores/last-todo-app/releases/download/v0.2.0/last-todo_0.2.0_amd64.deb',
+          },
+        ],
+      },
+      '0.1.0',
+      checkedAt,
+      'linux',
+    );
+
+    expect(status.updateAvailable).toBe(true);
+    expect(status.downloadLabel).toBe('DEB');
+    expect(status.downloadUrl).toMatch(/\.deb$/);
+  });
+
+  it('selects the installer EXE on Windows', () => {
+    const status = updateStatusFromRelease(
+      {
+        tag_name: 'v0.2.0',
+        assets: [
+          {
+            name: 'LastTodo Setup 0.2.0.exe',
+            browser_download_url:
+              'https://github.com/emflores/last-todo-app/releases/download/v0.2.0/LastTodo.Setup.0.2.0.exe',
+          },
+        ],
+      },
+      '0.1.0',
+      checkedAt,
+      'win32',
+    );
+
+    expect(status.updateAvailable).toBe(true);
+    expect(status.downloadLabel).toBe('Windows installer');
+    expect(status.downloadUrl).toMatch(/\.exe$/);
+  });
+
+  it('does not require an installer when the installed version is current', () => {
     const status = updateStatusFromRelease(
       { tag_name: 'v0.1.0', assets: [] },
       '0.1.0',
       checkedAt,
+      'linux',
     );
 
     expect(status.updateAvailable).toBe(false);

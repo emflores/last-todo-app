@@ -10,6 +10,17 @@ interface GitHubRelease {
   assets: GitHubAsset[];
 }
 
+export type UpdatePlatform = 'darwin' | 'linux' | 'win32';
+
+const PLATFORM_DOWNLOADS: Record<
+  UpdatePlatform,
+  { extension: string; label: string; name: string }
+> = {
+  darwin: { extension: '.dmg', label: 'DMG', name: 'macOS' },
+  linux: { extension: '.deb', label: 'DEB', name: 'Linux' },
+  win32: { extension: '.exe', label: 'Windows installer', name: 'Windows' },
+};
+
 function parseVersion(value: string): [number, number, number] {
   const match = /^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(value.trim());
   if (!match) throw new Error(`Invalid release version: ${value}`);
@@ -49,14 +60,14 @@ function parseRelease(value: unknown): GitHubRelease {
   return { tag_name: release.tag_name, assets };
 }
 
-function trustedDmgUrl(value: string): string | null {
+function trustedAssetUrl(value: string, extension: string): string | null {
   try {
     const url = new URL(value);
     const expectedPath = '/emflores/last-todo-app/releases/download/';
     return url.protocol === 'https:' &&
       url.hostname === 'github.com' &&
       url.pathname.startsWith(expectedPath) &&
-      url.pathname.toLowerCase().endsWith('.dmg')
+      url.pathname.toLowerCase().endsWith(extension)
       ? url.toString()
       : null;
   } catch {
@@ -68,24 +79,31 @@ export function updateStatusFromRelease(
   value: unknown,
   currentVersion: string,
   checkedAt: string,
+  platform: UpdatePlatform,
 ): UpdateStatus {
   const release = parseRelease(value);
   const latestVersion = release.tag_name.replace(/^v/, '');
   const updateAvailable = isNewerVersion(latestVersion, currentVersion);
-  const dmg = updateAvailable
-    ? release.assets.find((asset) => asset.name.toLowerCase().endsWith('.dmg'))
+  const target = PLATFORM_DOWNLOADS[platform];
+  const asset = updateAvailable
+    ? release.assets.find((candidate) =>
+        candidate.name.toLowerCase().endsWith(target.extension),
+      )
     : undefined;
-  const downloadUrl = dmg ? trustedDmgUrl(dmg.browser_download_url) : null;
+  const downloadUrl = asset
+    ? trustedAssetUrl(asset.browser_download_url, target.extension)
+    : null;
 
   return {
     currentVersion,
     latestVersion,
     updateAvailable: updateAvailable && Boolean(downloadUrl),
     downloadUrl,
+    downloadLabel: downloadUrl ? target.label : null,
     checkedAt,
     error:
       updateAvailable && !downloadUrl
-        ? `Version ${latestVersion} is available, but its macOS download is not ready yet.`
+        ? `Version ${latestVersion} is available, but its ${target.name} download is not ready yet.`
         : null,
   };
 }

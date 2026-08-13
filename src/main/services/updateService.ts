@@ -27,7 +27,7 @@ export class UpdateService {
         ? this.status
         : await this.check();
     if (!status.updateAvailable || !status.downloadUrl)
-      throw new Error('No macOS update is currently available.');
+      throw new Error('No update is currently available for this platform.');
     await shell.openExternal(status.downloadUrl);
   }
 
@@ -49,6 +49,7 @@ export class UpdateService {
         await response.json(),
         currentVersion,
         checkedAt,
+        supportedPlatform(),
       );
     } catch (error) {
       console.error('Could not check for a LastTodo update:', error);
@@ -58,10 +59,21 @@ export class UpdateService {
         latestVersion: null,
         updateAvailable: false,
         downloadUrl: null,
+        downloadLabel: null,
         checkedAt,
         error: 'Could not check GitHub for updates right now.',
       };
     }
     return this.status;
   }
+}
+
+function supportedPlatform(): 'darwin' | 'linux' | 'win32' {
+  if (
+    process.platform === 'darwin' ||
+    process.platform === 'linux' ||
+    process.platform === 'win32'
+  )
+    return process.platform;
+  throw new Error(`Unsupported update platform: ${process.platform}`);
 }

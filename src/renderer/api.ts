@@ -21,8 +21,11 @@ export interface TodoAPI {
   updateTodo(id: string, input: TodoDraft): Promise<Todo>;
   deleteTodo(id: string): Promise<void>;
   setTodoCompleted(id: string, completed: boolean): Promise<Todo>;
-  createType(input: { name: string }): Promise<void>;
-  updateType(id: string, input: { name: string }): Promise<void>;
+  createType(input: { name: string; emoji?: string }): Promise<void>;
+  updateType(
+    id: string,
+    input: { name?: string; emoji?: string },
+  ): Promise<void>;
   deleteType(id: string): Promise<void>;
   createLabel(input: {
     name: string;
@@ -42,6 +45,8 @@ export interface TodoAPI {
   restoreLatestBackup(): Promise<BackupStatus>;
   checkForUpdates(): Promise<UpdateStatus>;
   openUpdateDownload(): Promise<void>;
+  getOnboardingStatus(): Promise<{ complete: boolean }>;
+  completeOnboarding(): Promise<void>;
 }
 
 function bridge(): ContractAPI {
@@ -182,4 +187,6 @@ export const todoApi: TodoAPI = {
   restoreLatestBackup: () => bridge().restoreLatestBackup(),
   checkForUpdates: () => bridge().checkForUpdates(),
   openUpdateDownload: () => bridge().openUpdateDownload(),
+  getOnboardingStatus: () => bridge().getOnboardingStatus(),
+  completeOnboarding: () => bridge().completeOnboarding(),
 };

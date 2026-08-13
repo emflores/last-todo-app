@@ -50,6 +50,9 @@ const todoAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.restoreLatestBackup),
   checkForUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.checkForUpdates),
   openUpdateDownload: () => ipcRenderer.invoke(IPC_CHANNELS.openUpdateDownload),
+  getOnboardingStatus: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.getOnboardingStatus),
+  completeOnboarding: () => ipcRenderer.invoke(IPC_CHANNELS.completeOnboarding),
 } satisfies TodoAPI;
 
 contextBridge.exposeInMainWorld('todoAPI', todoAPI);

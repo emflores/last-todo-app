@@ -1,6 +1,13 @@
 import type Database from 'better-sqlite3';
 
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
+
+const DEFAULT_TYPE_EMOJI: Record<string, string> = {
+  'type-team': '🤝',
+  'type-people': '👥',
+  'type-product': '🧩',
+  'type-operational': '⚙️',
+};
 
 const migrations: Record<number, (db: Database.Database) => void> = {
   1: (db) => {
@@ -90,6 +97,12 @@ const migrations: Record<number, (db: Database.Database) => void> = {
     db.exec(
       'ALTER TABLE todos ADD COLUMN sensitive INTEGER NOT NULL DEFAULT 0 CHECK (sensitive IN (0, 1))',
     );
+  },
+  4: (db) => {
+    db.exec("ALTER TABLE types ADD COLUMN emoji TEXT NOT NULL DEFAULT '🏷️'");
+    const updateEmoji = db.prepare('UPDATE types SET emoji = ? WHERE id = ?');
+    for (const [id, emoji] of Object.entries(DEFAULT_TYPE_EMOJI))
+      updateEmoji.run(emoji, id);
   },
 };
 

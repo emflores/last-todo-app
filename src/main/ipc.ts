@@ -14,6 +14,7 @@ import {
 } from '../shared/contracts';
 import { BackupService } from './services/backupService';
 import { AppLogger } from './services/appLogger';
+import { SettingsStore } from './services/settingsStore';
 import { TaxonomyService } from './services/taxonomyService';
 import { TodoService } from './services/todoService';
 import { UpdateService } from './services/updateService';
@@ -24,6 +25,7 @@ export function registerIpcHandlers(
   backups: BackupService,
   updates: UpdateService,
   logger: AppLogger,
+  settings: SettingsStore,
 ): void {
   for (const channel of Object.values(IPC_CHANNELS))
     ipcMain.removeHandler(channel);
@@ -97,6 +99,12 @@ export function registerIpcHandlers(
   );
   ipcMain.handle(IPC_CHANNELS.checkForUpdates, () => updates.check());
   ipcMain.handle(IPC_CHANNELS.openUpdateDownload, () => updates.openDownload());
+  ipcMain.handle(IPC_CHANNELS.getOnboardingStatus, () => ({
+    complete: settings.onboardingComplete,
+  }));
+  ipcMain.handle(IPC_CHANNELS.completeOnboarding, () =>
+    settings.completeOnboarding(),
+  );
 
   ipcMain.removeAllListeners(IPC_CHANNELS.reportRendererError);
   ipcMain.on(IPC_CHANNELS.reportRendererError, (_event, value: unknown) => {

@@ -42,6 +42,12 @@ describe('backend services', () => {
       'Product',
       'Operational',
     ]);
+    expect(initial.types.map((type) => type.emoji)).toEqual([
+      '🤝',
+      '👥',
+      '🧩',
+      '⚙️',
+    ]);
     expect(
       initial.labels.find((label) => label.name === 'Priority')?.values,
     ).toHaveLength(3);
@@ -51,6 +57,13 @@ describe('backend services', () => {
     const legacyPath = path.join(directory, 'legacy-v2.db');
     const legacy = new BetterSqlite3(legacyPath);
     legacy.exec(`
+      CREATE TABLE types (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO types (id, name, sort_order)
+      VALUES ('type-team', 'Team', 0);
       CREATE TABLE todos (id TEXT PRIMARY KEY, title TEXT NOT NULL);
       INSERT INTO todos (id, title) VALUES ('legacy-todo', 'Existing task');
       PRAGMA user_version = 2;
@@ -62,6 +75,11 @@ describe('backend services', () => {
       .prepare('SELECT sensitive FROM todos WHERE id = ?')
       .get('legacy-todo') as { sensitive: number };
     expect(row.sensitive).toBe(0);
+    expect(
+      upgraded.db
+        .prepare('SELECT emoji FROM types WHERE id = ?')
+        .get('type-team'),
+    ).toEqual({ emoji: '🤝' });
     expect(upgraded.db.pragma('user_version', { simple: true })).toBe(
       CURRENT_SCHEMA_VERSION,
     );
@@ -211,7 +229,15 @@ describe('backend services', () => {
   });
 
   it('supports taxonomy CRUD and prevents deletion while in use', async () => {
-    const type = await taxonomy.createType({ name: 'Strategy', sortOrder: 10 });
+    const type = await taxonomy.createType({
+      name: 'Strategy',
+      emoji: '🧭',
+      sortOrder: 10,
+    });
+    expect(type.emoji).toBe('🧭');
+    expect((await taxonomy.updateType(type.id, { emoji: '♟️' })).emoji).toBe(
+      '♟️',
+    );
     const label = await taxonomy.createLabel({
       name: 'Theme',
       scope: 'type',
@@ -231,6 +257,22 @@ describe('backend services', () => {
     });
     await expect(taxonomy.deleteValue(value.id)).rejects.toThrow('in use');
     await expect(taxonomy.deleteType(type.id)).rejects.toThrow('in use');
+  });
+});
+
+describe('settings', () => {
+  it('persists completion of first-time onboarding', () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'lasttodo-settings-test-'),
+    );
+    const settingsPath = path.join(directory, 'settings.json');
+    const settings = new SettingsStore(settingsPath);
+    expect(settings.onboardingComplete).toBe(false);
+
+    settings.completeOnboarding();
+
+    expect(new SettingsStore(settingsPath).onboardingComplete).toBe(true);
+    fs.rmSync(directory, { recursive: true, force: true });
   });
 });
 

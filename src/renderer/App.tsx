@@ -31,6 +31,7 @@ type DueFilter = 'any' | LaneKey;
 type PriorityFilter = 'any' | 'high' | 'medium' | 'low' | 'none';
 type SortMode = 'due' | 'priority' | 'created' | 'title';
 type SettingsTab = 'types' | 'labels' | 'backup' | 'updates';
+type OnboardingStep = 1 | 2 | 3 | 4;
 type IconName =
   | 'inbox'
   | 'people'
@@ -336,6 +337,9 @@ export function App() {
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('types');
+  const [onboardingStep, setOnboardingStep] = useState<OnboardingStep | null>(
+    null,
+  );
 
   const refresh = async () => {
     try {
@@ -373,6 +377,18 @@ export function App() {
       );
     }
   };
+  const finishOnboarding = useCallback(async () => {
+    setOnboardingStep(null);
+    try {
+      await todoApi.completeOnboarding();
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : 'Could not save your welcome tour progress.',
+      );
+    }
+  }, []);
 
   useEffect(() => {
     void refresh();
@@ -381,12 +397,31 @@ export function App() {
       .then(setBackupStatus)
       .catch(() => undefined);
     void checkForUpdates();
+    todoApi
+      .getOnboardingStatus()
+      .then(({ complete }) => {
+        if (!complete) {
+          setView('board');
+          setSelectedType('all');
+          setSelectedPerson('all');
+          setLayout('board');
+          setOnboardingStep(1);
+        }
+      })
+      .catch(() => undefined);
   }, [checkForUpdates]);
   useEffect(() => {
     window.localStorage.setItem('lasttodo:layout', layout);
   }, [layout]);
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
+      if (onboardingStep) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          void finishOnboarding();
+        }
+        return;
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') {
         event.preventDefault();
         setQuickParentId(null);
@@ -396,7 +431,7 @@ export function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [finishOnboarding, onboardingStep]);
 
   const visibleTodos = useMemo(() => {
     if (showSensitive) return data.todos;
@@ -414,9 +449,12 @@ export function App() {
     }));
   }, [data.todos, showSensitive]);
   const parents = useMemo(() => flattenTodos(visibleTodos), [visibleTodos]);
-  const peopleLabel = data.labels.find(
-    (label) => label.name.toLowerCase() === 'people',
-  );
+  const peopleLabel =
+    data.labels.find((label) => label.id === 'label-people') ??
+    data.labels.find((label) => label.name.toLowerCase() === 'people');
+  const peopleTypeId =
+    peopleLabel?.gatedTypeId ??
+    data.types.find((type) => type.name.toLowerCase() === 'people')?.id;
   const activeCount = parents.filter((todo) => !todo.completedAt).length;
   const filtered = useMemo(
     () =>
@@ -507,9 +545,7 @@ export function App() {
     setEditing(null);
   };
   const selectTypeView = (typeId: string) => {
-    const isPeople = data.types.some(
-      (type) => type.id === typeId && type.name.toLowerCase() === 'people',
-    );
+    const isPeople = typeId === peopleTypeId;
     setView(isPeople ? 'people' : 'board');
     setSelectedType(typeId);
     setSelectedPerson('all');
@@ -529,7 +565,6 @@ export function App() {
     setStatusFilter('active');
     setSortMode('due');
   };
-
   return (
     <div className="app-shell">
       <aside className="rail">
@@ -551,21 +586,27 @@ export function App() {
           <span>My tasks</span>
           <span className="count">{activeCount}</span>
         </button>
-        <div className="rail-section-heading">
-          <span>Types</span>
+        <div
+          className={`rail-types ${onboardingStep === 4 ? 'onboarding-target' : ''}`}
+        >
+          <div className="rail-section-heading">
+            <span>Types</span>
+          </div>
+          <nav aria-label="Task types">
+            {data.types.map((type) => (
+              <button
+                key={type.id}
+                className={`rail-row ${view !== 'settings' && selectedType === type.id ? 'active' : ''}`}
+                onClick={() => selectTypeView(type.id)}
+              >
+                <span className="type-emoji" aria-hidden="true">
+                  {type.emoji}
+                </span>
+                <span>{type.name}</span>
+              </button>
+            ))}
+          </nav>
         </div>
-        <nav aria-label="Task types">
-          {data.types.map((type, index) => (
-            <button
-              key={type.id}
-              className={`rail-row ${view !== 'settings' && selectedType === type.id ? 'active' : ''}`}
-              onClick={() => selectTypeView(type.id)}
-            >
-              <span className={`type-dot dot-${index % 5}`} />
-              <span>{type.name}</span>
-            </button>
-          ))}
-        </nav>
         <div className="rail-spacer" />
         <button
           className={`rail-row ${view === 'settings' ? 'active' : ''}`}
@@ -607,7 +648,10 @@ export function App() {
                   </button>
                 )}
               </label>
-              <button className="primary" onClick={() => openCreate()}>
+              <button
+                className={`primary ${onboardingStep === 2 ? 'onboarding-target' : ''}`}
+                onClick={() => openCreate()}
+              >
                 <Icon name="plus" />
                 New task <kbd>⌘N</kbd>
               </button>
@@ -615,6 +659,7 @@ export function App() {
             {updateStatus?.updateAvailable && !updateBannerDismissed && (
               <UpdateAvailableBanner
                 version={updateStatus.latestVersion!}
+                downloadLabel={updateStatus.downloadLabel!}
                 onDownload={() => void openUpdateDownload()}
                 onDismiss={() => setUpdateBannerDismissed(true)}
               />
@@ -738,7 +783,10 @@ export function App() {
             {loading ? (
               <BoardSkeleton />
             ) : layout === 'board' ? (
-              <section className="board" aria-label="Tasks by due date">
+              <section
+                className={`board ${onboardingStep === 3 ? 'onboarding-target onboarding-board-target' : ''}`}
+                aria-label="Tasks by due date"
+              >
                 {LANES.map((lane) => (
                   <div className={`lane lane-${lane.id}`} key={lane.id}>
                     <div className="lane-head">
@@ -868,6 +916,137 @@ export function App() {
           }
         />
       )}
+      {onboardingStep && (
+        <FirstRunTour
+          step={onboardingStep}
+          onBack={() =>
+            setOnboardingStep((onboardingStep - 1) as OnboardingStep)
+          }
+          onNext={() =>
+            setOnboardingStep((onboardingStep + 1) as OnboardingStep)
+          }
+          onFinish={() => void finishOnboarding()}
+        />
+      )}
+    </div>
+  );
+}
+
+function FirstRunTour({
+  step,
+  onBack,
+  onNext,
+  onFinish,
+}: {
+  step: OnboardingStep;
+  onBack: () => void;
+  onNext: () => void;
+  onFinish: () => void;
+}) {
+  const content = {
+    1: {
+      eyebrow: 'Welcome to LastTodo',
+      title: 'Your tasks, on your terms',
+      body: (
+        <>
+          <p>
+            LastTodo stores every task locally on this computer, so your
+            workspace stays private and available offline.
+          </p>
+          <div className="onboarding-storage-flow" aria-label="Backup flow">
+            <span>💻 Local tasks</span>
+            <b>→</b>
+            <span>📁 Optional backup</span>
+            <b>→</b>
+            <span>☁️ Synced folder</span>
+          </div>
+          <p>
+            Backups are optional. Choose a backup folder in Settings—and point
+            it at Dropbox, Google Drive, OneDrive, or another synced folder—if
+            you want cloud persistence while keeping a portable local database.
+          </p>
+        </>
+      ),
+    },
+    2: {
+      eyebrow: 'Step 2 · Capture',
+      title: 'Create your first task here',
+      body: (
+        <p>
+          Use <strong>New task</strong> whenever something needs your attention.
+          Add a due date, type, priority, people, links, or subtasks when they
+          help.
+        </p>
+      ),
+    },
+    3: {
+      eyebrow: 'Step 3 · See what is next',
+      title: 'Dates organize the swim lanes',
+      body: (
+        <p>
+          Tasks flow into Overdue, Today, Next 7 days, Next 30 days, and Future
+          based on their due date. That gives you a useful horizon without
+          maintaining a board by hand.
+        </p>
+      ),
+    },
+    4: {
+      eyebrow: 'Step 4 · Make it yours',
+      title: 'Types shape your workspace',
+      body: (
+        <>
+          <p>
+            Types are configurable categories in the left column. Rename them,
+            give them an emoji, or create your own in Settings.
+          </p>
+          <p>
+            <strong>People is special:</strong> define people as values of the
+            People label in Settings. Tasks assigned to them gain quick,
+            person-specific filtering in the People view.
+          </p>
+        </>
+      ),
+    },
+  }[step];
+
+  return (
+    <div className={`onboarding-layer onboarding-step-${step}`}>
+      <div className="onboarding-scrim" />
+      <section
+        className="onboarding-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="onboarding-title"
+        tabIndex={-1}
+        autoFocus
+      >
+        <div className="onboarding-progress" aria-label={`Step ${step} of 4`}>
+          {[1, 2, 3, 4].map((value) => (
+            <i key={value} className={value <= step ? 'active' : ''} />
+          ))}
+        </div>
+        <p className="eyebrow">{content.eyebrow}</p>
+        <h2 id="onboarding-title">{content.title}</h2>
+        <div className="onboarding-copy">{content.body}</div>
+        <footer>
+          <button className="onboarding-skip" onClick={onFinish}>
+            Skip tour
+          </button>
+          <div>
+            {step > 1 && (
+              <button className="secondary" onClick={onBack}>
+                Back
+              </button>
+            )}
+            <button
+              className="primary"
+              onClick={step === 4 ? onFinish : onNext}
+            >
+              {step === 4 ? 'Start using LastTodo' : 'Next'}
+            </button>
+          </div>
+        </footer>
+      </section>
     </div>
   );
 }
@@ -902,10 +1081,12 @@ function BackupDisabledBanner({
 
 function UpdateAvailableBanner({
   version,
+  downloadLabel,
   onDownload,
   onDismiss,
 }: {
   version: string;
+  downloadLabel: string;
   onDownload: () => void;
   onDismiss: () => void;
 }) {
@@ -917,7 +1098,8 @@ function UpdateAvailableBanner({
       <div>
         <strong>LastTodo {version} is available</strong>
         <p>
-          Download the new DMG from GitHub and install it when you’re ready.
+          Download the new {downloadLabel} from GitHub and install it when
+          you’re ready.
         </p>
       </div>
       <button className="update-download-link" onClick={onDownload}>
@@ -975,7 +1157,7 @@ function FilterBar({
           <option value="all">All types</option>
           {types.map((type) => (
             <option key={type.id} value={type.id}>
-              {type.name}
+              {type.emoji} {type.name}
             </option>
           ))}
         </select>
@@ -1238,7 +1420,9 @@ function ListTaskGroup({
             {todo.description && <small>{todo.description}</small>}
           </div>
         </div>
-        <span className="list-type">{type?.name ?? 'Task'}</span>
+        <span className="list-type">
+          {type ? `${type.emoji} ${type.name}` : 'Task'}
+        </span>
         <div className="list-labels">
           {todo.labels.slice(0, 2).map((label) => (
             <span
@@ -1327,7 +1511,9 @@ function ListTaskGroup({
                 <small>Child task</small>
               </div>
             </div>
-            <span className="list-type">{childType?.name ?? 'Task'}</span>
+            <span className="list-type">
+              {childType ? `${childType.emoji} ${childType.name}` : 'Task'}
+            </span>
             <div className="list-labels">
               {child.labels.slice(0, 2).map((label) => (
                 <span className="chip" key={label.labelValueId}>
@@ -1383,10 +1569,14 @@ function TaskCard({
     !todo.children.length || completeChildren === todo.children.length;
   const type = types.find((candidate) => candidate.id === todo.typeId);
   const people = todo.labels.filter(
-    (label) => label.labelName.toLowerCase() === 'people',
+    (label) =>
+      label.labelId === 'label-people' ||
+      label.labelName.toLowerCase() === 'people',
   );
   const cardLabels = todo.labels.filter(
-    (label) => label.labelName.toLowerCase() !== 'people',
+    (label) =>
+      label.labelId !== 'label-people' &&
+      label.labelName.toLowerCase() !== 'people',
   );
   const dueLane = laneFor(todo, allTodos);
   const priorityLevel = priorityName(todo);
@@ -1433,6 +1623,7 @@ function TaskCard({
         </button>
         <div className="card-title">
           <span className="type-name">
+            {type?.emoji && <b className="task-type-emoji">{type.emoji}</b>}
             {type?.name ?? 'Task'}
             {todo.sensitive && (
               <span className="sensitive-badge" title="Sensitive task">
@@ -1710,7 +1901,7 @@ function TaskModal({
                   <option value="">Choose type…</option>
                   {data.types.map((type) => (
                     <option key={type.id} value={type.id}>
-                      {type.name}
+                      {type.emoji} {type.name}
                     </option>
                   ))}
                 </select>
@@ -1959,6 +2150,43 @@ function TaskModal({
   );
 }
 
+function TypeEmojiEditor({
+  type,
+  busy,
+  onSave,
+}: {
+  type: TodoType;
+  busy: boolean;
+  onSave: (emoji: string) => Promise<void>;
+}) {
+  const [value, setValue] = useState(type.emoji);
+
+  useEffect(() => setValue(type.emoji), [type.emoji]);
+
+  const save = () => {
+    const next = value.trim() || '🏷️';
+    setValue(next);
+    if (next !== type.emoji) void onSave(next);
+  };
+
+  return (
+    <input
+      className="type-emoji-input"
+      aria-label={`Emoji for ${type.name}`}
+      title={`Emoji for ${type.name}`}
+      value={value}
+      maxLength={16}
+      disabled={busy}
+      onChange={(event) => setValue(event.currentTarget.value)}
+      onFocus={(event) => event.currentTarget.select()}
+      onBlur={save}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur();
+      }}
+    />
+  );
+}
+
 function Settings({
   data,
   busy,
@@ -1988,6 +2216,7 @@ function Settings({
 }) {
   const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [newType, setNewType] = useState('');
+  const [newTypeEmoji, setNewTypeEmoji] = useState('🏷️');
   const [newValue, setNewValue] = useState<Record<string, string>>({});
   const [renameTarget, setRenameTarget] = useState<{
     label: string;
@@ -2012,8 +2241,12 @@ function Settings({
     event.preventDefault();
     if (!newType.trim()) return;
     void mutate(async () => {
-      await todoApi.createType({ name: newType.trim() });
+      await todoApi.createType({
+        name: newType.trim(),
+        emoji: newTypeEmoji.trim() || '🏷️',
+      });
       setNewType('');
+      setNewTypeEmoji('🏷️');
     });
   };
   const addLabel = (event: FormEvent) => {
@@ -2106,9 +2339,15 @@ function Settings({
                 </div>
               </div>
               <div className="settings-list">
-                {data.types.map((type, index) => (
+                {data.types.map((type) => (
                   <div className="settings-row" key={type.id}>
-                    <span className={`type-dot dot-${index % 5}`} />
+                    <TypeEmojiEditor
+                      type={type}
+                      busy={busy}
+                      onSave={(emoji) =>
+                        mutate(() => todoApi.updateType(type.id, { emoji }))
+                      }
+                    />
                     <div>
                       <strong>{type.name}</strong>
                       <small>
@@ -2142,7 +2381,15 @@ function Settings({
                   </div>
                 ))}
               </div>
-              <form className="inline-create" onSubmit={addType}>
+              <form className="inline-create type-create" onSubmit={addType}>
+                <input
+                  className="new-type-emoji"
+                  aria-label="New type emoji"
+                  value={newTypeEmoji}
+                  maxLength={16}
+                  onChange={(event) => setNewTypeEmoji(event.target.value)}
+                  onFocus={(event) => event.currentTarget.select()}
+                />
                 <input
                   value={newType}
                   onChange={(event) => setNewType(event.target.value)}
@@ -2325,7 +2572,7 @@ function Settings({
                         <option value="">Choose…</option>
                         {data.types.map((type) => (
                           <option key={type.id} value={type.id}>
-                            {type.name}
+                            {type.emoji} {type.name}
                           </option>
                         ))}
                       </select>
@@ -2509,7 +2756,7 @@ function Settings({
               <div className="update-actions">
                 {updateStatus?.updateAvailable && (
                   <button className="primary" onClick={onOpenUpdateDownload}>
-                    Download DMG from GitHub
+                    Download {updateStatus.downloadLabel} from GitHub
                   </button>
                 )}
                 <button

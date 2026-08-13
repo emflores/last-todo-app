@@ -5,6 +5,7 @@ export type LabelCardinality = 'single' | 'multi';
 export interface TodoType {
   id: string;
   name: string;
+  emoji: string;
   sortOrder: number;
 }
 
@@ -111,10 +112,12 @@ export interface TodoQuery {
 
 export interface CreateTypeInput {
   name: string;
+  emoji?: string;
   sortOrder?: number;
 }
 export interface UpdateTypeInput {
   name?: string;
+  emoji?: string;
   sortOrder?: number;
 }
 export interface CreateLabelInput {
@@ -149,6 +152,7 @@ export interface UpdateStatus {
   latestVersion: string | null;
   updateAvailable: boolean;
   downloadUrl: string | null;
+  downloadLabel: string | null;
   checkedAt: string;
   error: string | null;
 }
@@ -192,6 +196,8 @@ export const IPC_CHANNELS = {
   restoreLatestBackup: 'backups:restore-latest',
   checkForUpdates: 'updates:check',
   openUpdateDownload: 'updates:open-download',
+  getOnboardingStatus: 'onboarding:status',
+  completeOnboarding: 'onboarding:complete',
   reportRendererError: 'diagnostics:renderer-error',
 } as const;
 
@@ -222,4 +228,6 @@ export interface TodoAPI {
   restoreLatestBackup(): Promise<BackupStatus>;
   checkForUpdates(): Promise<UpdateStatus>;
   openUpdateDownload(): Promise<void>;
+  getOnboardingStatus(): Promise<{ complete: boolean }>;
+  completeOnboarding(): Promise<void>;
 }

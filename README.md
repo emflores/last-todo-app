@@ -93,10 +93,11 @@ system's normal one-time **Open** / **Run anyway** flow if you trust your build.
 ## Application updates
 
 Packaged builds check GitHub Releases for the latest published version. When a
-newer release includes a macOS DMG, LastTodo shows a download link and opens
-the GitHub asset in the default browser. The user downloads and installs the
-new version manually; LastTodo never downloads or installs an update in the
-background.
+newer release includes an installer for the current platform, LastTodo shows a
+download link and opens the GitHub asset in the default browser. It selects a
+DMG on macOS, DEB on Linux, and the installer EXE on Windows. The user downloads
+and installs the new version manually; LastTodo never downloads or installs an
+update in the background.
 
 The SQLite database remains under Electron's per-user `userData` directory and
 is never part of the installed application bundle, so replacing the app does

@@ -5,6 +5,7 @@ export type Cardinality = 'single' | 'multi';
 export interface TodoType {
   id: string;
   name: string;
+  emoji: string;
   sortOrder: number;
 }
 

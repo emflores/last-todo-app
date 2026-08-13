@@ -20,13 +20,26 @@ function name(value: string): string {
   return trimmed;
 }
 
+function emoji(value: string | undefined): string {
+  const trimmed = value?.trim() || '🏷️';
+  if (Array.from(trimmed).length > 8) throw new Error('Emoji is too long');
+  return trimmed;
+}
+
 export class TaxonomyService {
   constructor(private readonly database: AppDatabase) {}
 
   list(): Taxonomy {
     const types = this.database.db
-      .prepare('SELECT id,name,sort_order FROM types ORDER BY sort_order,name')
-      .all() as Array<{ id: string; name: string; sort_order: number }>;
+      .prepare(
+        'SELECT id,name,emoji,sort_order FROM types ORDER BY sort_order,name',
+      )
+      .all() as Array<{
+      id: string;
+      name: string;
+      emoji: string;
+      sort_order: number;
+    }>;
     const labels = this.database.db
       .prepare('SELECT * FROM labels ORDER BY sort_order,name')
       .all() as Array<{
@@ -52,6 +65,7 @@ export class TaxonomyService {
       types: types.map((type) => ({
         id: type.id,
         name: type.name,
+        emoji: type.emoji,
         sortOrder: type.sort_order,
       })),
       labels: labels.map((label) => ({
@@ -78,8 +92,10 @@ export class TaxonomyService {
     const id = randomUUID();
     await this.database.write((db) =>
       db
-        .prepare('INSERT INTO types (id,name,sort_order) VALUES (?,?,?)')
-        .run(id, name(input.name), input.sortOrder ?? 0),
+        .prepare(
+          'INSERT INTO types (id,name,emoji,sort_order) VALUES (?,?,?,?)',
+        )
+        .run(id, name(input.name), emoji(input.emoji), input.sortOrder ?? 0),
     );
     return this.type(id);
   }
@@ -87,11 +103,12 @@ export class TaxonomyService {
   async updateType(id: string, input: UpdateTypeInput): Promise<TodoType> {
     await this.database.write((db) => {
       const old = db.prepare('SELECT * FROM types WHERE id=?').get(id) as
-        | { name: string; sort_order: number }
+        | { name: string; emoji: string; sort_order: number }
         | undefined;
       if (!old) throw new Error('Type not found');
-      db.prepare('UPDATE types SET name=?,sort_order=? WHERE id=?').run(
+      db.prepare('UPDATE types SET name=?,emoji=?,sort_order=? WHERE id=?').run(
         input.name === undefined ? old.name : name(input.name),
+        input.emoji === undefined ? old.emoji : emoji(input.emoji),
         input.sortOrder ?? old.sort_order,
         id,
       );
@@ -256,10 +273,17 @@ export class TaxonomyService {
 
   private type(id: string): TodoType {
     const row = this.database.db
-      .prepare('SELECT id,name,sort_order FROM types WHERE id=?')
-      .get(id) as { id: string; name: string; sort_order: number } | undefined;
+      .prepare('SELECT id,name,emoji,sort_order FROM types WHERE id=?')
+      .get(id) as
+      | { id: string; name: string; emoji: string; sort_order: number }
+      | undefined;
     if (!row) throw new Error('Type not found');
-    return { id: row.id, name: row.name, sortOrder: row.sort_order };
+    return {
+      id: row.id,
+      name: row.name,
+      emoji: row.emoji,
+      sortOrder: row.sort_order,
+    };
   }
 
   private label(id: string): LabelDefinition {

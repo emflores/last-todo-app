@@ -165,7 +165,7 @@ void app
     const taxonomy = new TaxonomyService(database);
     backups = new BackupService(database, settings);
     updates = new UpdateService(logger);
-    registerIpcHandlers(todos, taxonomy, backups, updates, logger);
+    registerIpcHandlers(todos, taxonomy, backups, updates, logger, settings);
     backups.start();
     createWindow();
 
