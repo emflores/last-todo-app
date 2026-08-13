@@ -94,8 +94,8 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.getBackupStatus, () => backups.status());
   ipcMain.handle(IPC_CHANNELS.chooseBackupFolder, () => backups.chooseFolder());
   ipcMain.handle(IPC_CHANNELS.runBackupNow, () => backups.runNow());
-  ipcMain.handle(IPC_CHANNELS.restoreLatestBackup, () =>
-    backups.restoreLatest(),
+  ipcMain.handle(IPC_CHANNELS.restoreFromBackup, () =>
+    backups.restoreFromBackup(),
   );
   ipcMain.handle(IPC_CHANNELS.checkForUpdates, () => updates.check());
   ipcMain.handle(IPC_CHANNELS.openUpdateDownload, () => updates.openDownload());

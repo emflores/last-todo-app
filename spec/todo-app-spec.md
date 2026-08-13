@@ -33,6 +33,7 @@ A single-user desktop to-do app tailored to your workflow. Local-first. A local 
 ### 4.1 What & when
 - On **app startup** and **hourly** while running, dump a snapshot into `<syncedFolder>/backups/`.
 - Format: a compacted `.db` file via `VACUUM INTO` — a transactionally consistent copy of the live DB. Restore is a drop-in, and it includes completed rows, so there's no separate completed-store backup to manage.
+- Manual restore opens `<syncedFolder>/backups/`, lets the user choose a `.db` snapshot, and confirms the selected filename before replacing the working database.
 
 ### 4.2 Daily vs hourly
 - The **first** snapshot of each calendar day is the **daily** backup — whether that's the startup snapshot, or the first hourly tick after the day boundary if the app was already running.
@@ -62,10 +63,17 @@ CREATE TABLE labels (
   id            TEXT PRIMARY KEY,
   name          TEXT NOT NULL,
   scope         TEXT NOT NULL CHECK (scope IN ('universal','type')),
-  gated_type_id TEXT REFERENCES types(id),          -- set when scope='type'
-  value_kind    TEXT NOT NULL CHECK (value_kind IN ('enum','user_managed')),
+  gated_type_id TEXT REFERENCES types(id),          -- legacy primary type
+  value_kind    TEXT NOT NULL DEFAULT 'enum',        -- legacy compatibility
   cardinality   TEXT NOT NULL CHECK (cardinality IN ('single','multi')),
+  quick_filter  INTEGER NOT NULL DEFAULT 0,
   sort_order    INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE label_types (
+  label_id TEXT NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+  type_id  TEXT NOT NULL REFERENCES types(id),
+  PRIMARY KEY (label_id, type_id)
 );
 
 CREATE TABLE label_values (
@@ -118,7 +126,7 @@ Notes:
 ### 6.1 Types & labels
 - Every to-do has exactly one required **type**.
 - Selecting a type reveals that type's **type-gated** labels; **universal** labels (e.g. Priority = Low/Med/High, single) always show.
-- People is a type-gated, user-managed, multi-value label; Priority is universal, enum, single. New universal labels drop in with `scope='universal'` and no new machinery.
+- The seeded People label is type-gated, user-managed, multi-value, and enabled as a quick filter; Priority is universal, enum, single. These are ordinary label settings and can be deleted or recreated without special application behavior.
 
 ### 6.2 Hierarchy & completion
 - One level of nesting (a parent and its children; children can't have children).
@@ -142,15 +150,15 @@ Rolling windows (not calendar week/month). Completed items are hidden by default
 
 ### 7.2 Left rail — quick filters
 - Filter by **type** (Team, People, Product, Operational, …).
-- **People** view pins a person picker at top to drill into one person.
-- Compound filters supported, e.g. "Team-level, grouped by Priority."
+- Any label can expose its values as a quick-filter radio group in every view where that label applies.
+- Multiple quick-filter labels can appear in one view and combine, e.g. "Alice" and "High priority."
 
 ### 7.3 Search
-- A top search bar that **compounds with active filters**: it searches within the current filtered set (e.g. with a People-tag filter applied, search is scoped to that tag).
+- A top search bar that **compounds with active filters**: it searches within the current filtered set.
 
 ## 8. Create / edit UX
 - Fields: Title (required), Due date (required), Type (required); type-gated + universal labels; Description (free text); Links (add-more `{label?, url}`); optional parent.
-- A settings area manages Types, Labels, and label values (add a person, add a product, etc.).
+- A settings area manages Types, Labels, label values, and which labels provide quick filters.
 
 ## 9. Suggested stack
 - **Electron**: main process owns the DB, writes, migrations, snapshots, cleanup, folder dialog; renderer is UI over IPC.

@@ -54,6 +54,33 @@ type PriorityFilter = 'any' | 'high' | 'medium' | 'low' | 'none';
 type SortMode = 'due' | 'priority' | 'created' | 'title';
 type SettingsTab = 'types' | 'labels' | 'backup' | 'updates' | 'debug';
 type OnboardingStep = 1 | 2 | 3 | 4;
+const TYPE_EMOJI_OPTIONS = [
+  ['🏷️', 'Label'],
+  ['🤝', 'Team'],
+  ['👥', 'People'],
+  ['🧩', 'Product'],
+  ['⚙️', 'Operations'],
+  ['💼', 'Work'],
+  ['🏠', 'Home'],
+  ['🎯', 'Goal'],
+  ['🚀', 'Launch'],
+  ['💡', 'Idea'],
+  ['📌', 'Important'],
+  ['📅', 'Schedule'],
+  ['✅', 'Tasks'],
+  ['🛠️', 'Project'],
+  ['📣', 'Marketing'],
+  ['💰', 'Finance'],
+  ['❤️', 'Personal'],
+  ['🌱', 'Growth'],
+  ['📚', 'Learning'],
+  ['🧭', 'Strategy'],
+  ['🛒', 'Errands'],
+  ['🧪', 'Experiment'],
+  ['🔒', 'Private'],
+  ['⭐', 'Favorite'],
+] as const;
+const DEFAULT_TYPE_EMOJI = TYPE_EMOJI_OPTIONS[0][0];
 type IconName =
   | 'inbox'
   | 'people'
@@ -133,11 +160,6 @@ function plusDays(date: Date, days: number) {
   const copy = new Date(date);
   copy.setDate(copy.getDate() + days);
   return localISO(copy);
-}
-
-function personName(value: string) {
-  const [firstName = value, ...rest] = value.trim().split(/\s+/);
-  return { firstName, lastName: rest.join(' ') };
 }
 
 function effectiveDate(todo: Todo, all: Todo[]): string | null {
@@ -338,7 +360,9 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<ViewName>('board');
   const [selectedType, setSelectedType] = useState<string>('all');
-  const [selectedPerson, setSelectedPerson] = useState<string>('all');
+  const [selectedQuickFilters, setSelectedQuickFilters] = useState<
+    Record<string, string>
+  >({});
   const [query, setQuery] = useState('');
   const [layout, setLayout] = useState<LayoutMode>(() =>
     window.localStorage.getItem('lasttodo:layout') === 'list'
@@ -441,7 +465,7 @@ export function App() {
         if (!complete) {
           setView('board');
           setSelectedType('all');
-          setSelectedPerson('all');
+          setSelectedQuickFilters({});
           setLayout('board');
           setOnboardingStep(1);
         }
@@ -499,12 +523,27 @@ export function App() {
     }));
   }, [data.todos, showSensitive]);
   const parents = useMemo(() => flattenTodos(visibleTodos), [visibleTodos]);
-  const peopleLabel =
-    data.labels.find((label) => label.id === 'label-people') ??
-    data.labels.find((label) => label.name.toLowerCase() === 'people');
-  const peopleTypeId =
-    peopleLabel?.gatedTypeId ??
-    data.types.find((type) => type.name.toLowerCase() === 'people')?.id;
+  const quickFilterLabels = useMemo(
+    () =>
+      data.labels.filter(
+        (label) =>
+          label.quickFilter &&
+          label.values.length > 0 &&
+          (label.scope === 'universal' ||
+            label.gatedTypeIds.includes(selectedType)),
+      ),
+    [data.labels, selectedType],
+  );
+  const activeQuickFilterValueIds = useMemo(
+    () =>
+      quickFilterLabels.flatMap((label) => {
+        const selected = selectedQuickFilters[label.id];
+        return selected && label.values.some((value) => value.id === selected)
+          ? [selected]
+          : [];
+      }),
+    [quickFilterLabels, selectedQuickFilters],
+  );
   const activeCount = parents.filter((todo) => !todo.completedAt).length;
   const filtered = useMemo(
     () =>
@@ -515,8 +554,9 @@ export function App() {
           if (selectedType !== 'all' && todo.typeId !== selectedType)
             return false;
           if (
-            selectedPerson !== 'all' &&
-            !todo.labels.some((label) => label.labelValueId === selectedPerson)
+            !activeQuickFilterValueIds.every((valueId) =>
+              todo.labels.some((label) => label.labelValueId === valueId),
+            )
           )
             return false;
           const needle = query.trim().toLowerCase();
@@ -543,7 +583,7 @@ export function App() {
       parents,
       statusFilter,
       selectedType,
-      selectedPerson,
+      activeQuickFilterValueIds,
       query,
       dueFilter,
       priorityFilter,
@@ -565,13 +605,7 @@ export function App() {
   const selectedTypeName = data.types.find(
     (type) => type.id === selectedType,
   )?.name;
-  const selectedPersonName = peopleLabel?.values.find(
-    (value) => value.id === selectedPerson,
-  )?.value;
-  const title =
-    view === 'people'
-      ? (selectedPersonName ?? 'People')
-      : (selectedTypeName ?? 'My tasks');
+  const title = selectedTypeName ?? 'All tasks';
 
   const mutate = async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -595,21 +629,20 @@ export function App() {
     setEditing(null);
   };
   const selectTypeView = (typeId: string) => {
-    const isPeople = typeId === peopleTypeId;
-    setView(isPeople ? 'people' : 'board');
+    setView('board');
     setSelectedType(typeId);
-    setSelectedPerson('all');
+    setSelectedQuickFilters({});
   };
   const hasActiveFilters =
     selectedType !== 'all' ||
-    selectedPerson !== 'all' ||
+    activeQuickFilterValueIds.length > 0 ||
     dueFilter !== 'any' ||
     priorityFilter !== 'any' ||
     statusFilter !== 'active' ||
     sortMode !== 'due';
   const resetFilters = () => {
     setSelectedType('all');
-    setSelectedPerson('all');
+    setSelectedQuickFilters({});
     setDueFilter('any');
     setPriorityFilter('any');
     setStatusFilter('active');
@@ -628,6 +661,15 @@ export function App() {
     }
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', todo.id);
+    const card = event.currentTarget.closest('.task-card');
+    if (card instanceof HTMLElement) {
+      const bounds = card.getBoundingClientRect();
+      event.dataTransfer.setDragImage(
+        card,
+        Math.max(0, Math.min(event.clientX - bounds.left, bounds.width)),
+        Math.max(0, Math.min(event.clientY - bounds.top, bounds.height)),
+      );
+    }
     setDraggingTodoId(todo.id);
   };
   const laneAcceptsDrag = (targetLane: LaneKey): boolean => {
@@ -667,11 +709,11 @@ export function App() {
           onClick={() => {
             setView('board');
             setSelectedType('all');
-            setSelectedPerson('all');
+            setSelectedQuickFilters({});
           }}
         >
           <Icon name="inbox" />
-          <span>My tasks</span>
+          <span>All tasks</span>
           <span className="count">{activeCount}</span>
         </button>
         <div
@@ -763,10 +805,7 @@ export function App() {
             )}
             <section className="view-heading">
               <div>
-                <p className="eyebrow">
-                  {timeGreeting()} ·{' '}
-                  {view === 'people' ? 'Working with' : 'Workspace'}
-                </p>
+                <p className="eyebrow">{timeGreeting()}</p>
                 <h1>{title}</h1>
                 <p>
                   {filtered.length} {filtered.length === 1 ? 'task' : 'tasks'}{' '}
@@ -792,40 +831,19 @@ export function App() {
                 </button>
               </div>
             </section>
-            {view === 'people' && (
-              <nav className="people-quick-view" aria-label="Filter by person">
-                <button
-                  className={selectedPerson === 'all' ? 'active' : ''}
-                  onClick={() => setSelectedPerson('all')}
-                >
-                  <span className="person-avatar">
-                    <Icon name="people" />
-                  </span>
-                  <span className="person-name">
-                    <strong>Everyone</strong>
-                    <small>All people</small>
-                  </span>
-                </button>
-                {peopleLabel?.values.map((person) => {
-                  const { firstName, lastName } = personName(person.value);
-                  return (
-                    <button
-                      key={person.id}
-                      className={selectedPerson === person.id ? 'active' : ''}
-                      onClick={() => setSelectedPerson(person.id)}
-                    >
-                      <span className="person-avatar">
-                        {firstName.slice(0, 1)}
-                        {lastName.slice(0, 1)}
-                      </span>
-                      <span className="person-name">
-                        <strong>{firstName}</strong>
-                        <small>{lastName || 'Person'}</small>
-                      </span>
-                    </button>
-                  );
-                })}
-              </nav>
+            {quickFilterLabels.length > 0 && (
+              <QuickFilterPanel
+                labels={quickFilterLabels}
+                selected={selectedQuickFilters}
+                onChange={(labelId, valueId) =>
+                  setSelectedQuickFilters((current) => {
+                    if (valueId) return { ...current, [labelId]: valueId };
+                    const next = { ...current };
+                    delete next[labelId];
+                    return next;
+                  })
+                }
+              />
             )}
             <div className="filter-controls">
               <label className="sensitive-view-toggle">
@@ -1097,14 +1115,15 @@ function FirstRunTour({
           <div className="onboarding-storage-flow" aria-label="Backup flow">
             <span>💻 Local tasks</span>
             <b>→</b>
-            <span>📁 Optional backup</span>
+            <span>📁 Any folder</span>
             <b>→</b>
-            <span>☁️ Synced folder</span>
+            <span>☁️ Sync it for cloud backup</span>
           </div>
           <p>
-            Backups are optional. Choose a backup folder in Settings—and point
-            it at Dropbox, Google Drive, OneDrive, or another synced folder—if
-            you want cloud persistence while keeping a portable local database.
+            Backups are optional, and <strong>any local folder works</strong>.
+            If the folder you choose is already synced by Dropbox, Google Drive,
+            OneDrive, or another service, your backup files ride along and you
+            get cloud persistence without a LastTodo account or subscription.
           </p>
         </>
       ),
@@ -1124,11 +1143,19 @@ function FirstRunTour({
       eyebrow: 'Step 3 · See what is next',
       title: 'Dates organize the swim lanes',
       body: (
-        <p>
-          Tasks flow into Overdue, Today, Next 7 days, Next 30 days, and Future
-          based on their due date. That gives you a useful horizon without
-          maintaining a board by hand.
-        </p>
+        <>
+          <p>
+            Tasks flow into Overdue, Today, Next 7 days, Next 30 days, and
+            Future based on their due date. This view is opinionated by design:
+            it asks you to make a real decision about urgency instead of leaving
+            work in an unranked pile.
+          </p>
+          <p>
+            Need to punt something or pull it forward? Drag a card by its edge
+            between Today, Next 7 days, Next 30 days, and Future, then confirm
+            the proposed new due date.
+          </p>
+        </>
       ),
     },
     4: {
@@ -1137,13 +1164,13 @@ function FirstRunTour({
       body: (
         <>
           <p>
-            Types are configurable categories in the left column. Rename them,
-            give them an emoji, or create your own in Settings.
+            Types are configurable categories in the left column. Edit their
+            name and icon, or create your own in Settings.
           </p>
           <p>
-            <strong>People is special:</strong> define people as values of the
-            People label in Settings. Tasks assigned to them gain quick,
-            person-specific filtering in the People view.
+            <strong>Labels add context:</strong> enable quick filters for any
+            label in Settings to keep its values handy above the task views
+            where that label applies.
           </p>
         </>
       ),
@@ -1254,6 +1281,57 @@ function UpdateAvailableBanner({
         <Icon name="x" />
       </button>
     </div>
+  );
+}
+
+function QuickFilterPanel({
+  labels,
+  selected,
+  onChange,
+}: {
+  labels: LabelDefinition[];
+  selected: Record<string, string>;
+  onChange: (labelId: string, valueId: string | null) => void;
+}) {
+  return (
+    <section className="quick-filter-panel" aria-label="Quick filters">
+      {labels.map((label) => {
+        const selectedValue = selected[label.id] ?? null;
+        return (
+          <div className="quick-filter-group" key={label.id}>
+            <div className="quick-filter-heading">
+              <strong>{label.name}</strong>
+              <small>Quick filter</small>
+            </div>
+            <div
+              className="quick-filter-options"
+              role="radiogroup"
+              aria-label={`Filter by ${label.name}`}
+            >
+              <button
+                className={selectedValue === null ? 'active' : ''}
+                role="radio"
+                aria-checked={selectedValue === null}
+                onClick={() => onChange(label.id, null)}
+              >
+                All
+              </button>
+              {label.values.map((value) => (
+                <button
+                  className={selectedValue === value.id ? 'active' : ''}
+                  key={value.id}
+                  role="radio"
+                  aria-checked={selectedValue === value.id}
+                  onClick={() => onChange(label.id, value.id)}
+                >
+                  {value.value}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </section>
   );
 }
 
@@ -1715,16 +1793,7 @@ function TaskCard({
   const canComplete =
     !todo.children.length || completeChildren === todo.children.length;
   const type = types.find((candidate) => candidate.id === todo.typeId);
-  const people = todo.labels.filter(
-    (label) =>
-      label.labelId === 'label-people' ||
-      label.labelName.toLowerCase() === 'people',
-  );
-  const cardLabels = todo.labels.filter(
-    (label) =>
-      label.labelId !== 'label-people' &&
-      label.labelName.toLowerCase() !== 'people',
-  );
+  const cardLabels = todo.labels;
   const dueLane = laneFor(todo, allTodos);
   const priorityLevel = priorityName(todo);
   const toggle = async () => {
@@ -1744,14 +1813,22 @@ function TaskCard({
     <article
       className={`task-card priority-card-${priorityLevel} ${todo.completedAt ? 'completed' : ''} ${completing ? 'completing' : ''}`}
       tabIndex={0}
-      draggable={draggable}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
       onClick={onEdit}
       onKeyDown={(event) => {
         if (event.key === 'Enter') onEdit();
       }}
     >
+      {draggable &&
+        ['top', 'right', 'bottom', 'left'].map((edge) => (
+          <span
+            className={`task-drag-edge task-drag-edge-${edge}`}
+            draggable
+            aria-hidden="true"
+            key={edge}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+          />
+        ))}
       <div className="card-top">
         <button
           className="completion"
@@ -1816,27 +1893,6 @@ function TaskCard({
         >
           {niceDate(effectiveDate(todo, allTodos))}
         </time>
-        {people.length > 0 && (
-          <span
-            className="card-people"
-            aria-label={`People: ${people.map((person) => person.value).join(', ')}`}
-          >
-            {people.slice(0, 3).map((person) => {
-              const { firstName, lastName } = personName(person.value);
-              return (
-                <i
-                  key={person.labelValueId}
-                  title={person.value}
-                  aria-hidden="true"
-                >
-                  {firstName.slice(0, 1)}
-                  {lastName.slice(0, 1)}
-                </i>
-              );
-            })}
-            {people.length > 3 && <b>+{people.length - 3}</b>}
-          </span>
-        )}
         {todo.links.length > 0 && (
           <span>
             <Icon name="link" />
@@ -1941,7 +1997,7 @@ function TaskModal({
   const isChild = Boolean(draft.parentId);
   const availableLabels = data.labels.filter(
     (label) =>
-      label.scope === 'universal' || label.gatedTypeId === draft.typeId,
+      label.scope === 'universal' || label.gatedTypeIds.includes(draft.typeId),
   );
   const valid = Boolean(
     draft.title.trim() && draft.typeId && (draft.dueDate || isChild),
@@ -2446,43 +2502,6 @@ function RescheduleModal({
   );
 }
 
-function TypeEmojiEditor({
-  type,
-  busy,
-  onSave,
-}: {
-  type: TodoType;
-  busy: boolean;
-  onSave: (emoji: string) => Promise<void>;
-}) {
-  const [value, setValue] = useState(type.emoji);
-
-  useEffect(() => setValue(type.emoji), [type.emoji]);
-
-  const save = () => {
-    const next = value.trim() || '🏷️';
-    setValue(next);
-    if (next !== type.emoji) void onSave(next);
-  };
-
-  return (
-    <input
-      className="type-emoji-input"
-      aria-label={`Emoji for ${type.name}`}
-      title={`Emoji for ${type.name}`}
-      value={value}
-      maxLength={16}
-      disabled={busy}
-      onChange={(event) => setValue(event.currentTarget.value)}
-      onFocus={(event) => event.currentTarget.select()}
-      onBlur={save}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') event.currentTarget.blur();
-      }}
-    />
-  );
-}
-
 function FieldHelp({ text }: { text: string }) {
   return (
     <span className="field-help" tabIndex={0} aria-label={text}>
@@ -2491,6 +2510,57 @@ function FieldHelp({ text }: { text: string }) {
         {text}
       </span>
     </span>
+  );
+}
+
+function TaskTypeMultiSelect({
+  types,
+  selected,
+  onChange,
+}: {
+  types: TodoType[];
+  selected: string[];
+  onChange: (typeIds: string[]) => void;
+}) {
+  const selectedNames = types
+    .filter((type) => selected.includes(type.id))
+    .map((type) => `${type.emoji} ${type.name}`);
+  return (
+    <details className="type-multi-select">
+      <summary>
+        <span>
+          {selectedNames.length > 0
+            ? selectedNames.join(', ')
+            : 'Choose task types…'}
+        </span>
+        <Icon name="chevron" />
+      </summary>
+      <div className="type-multi-select-menu">
+        {types.map((type) => {
+          const checked = selected.includes(type.id);
+          return (
+            <label key={type.id}>
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={(event) =>
+                  onChange(
+                    event.currentTarget.checked
+                      ? [...selected, type.id]
+                      : selected.filter((typeId) => typeId !== type.id),
+                  )
+                }
+              />
+              <span className="type-multi-check">
+                {checked && <Icon name="check" />}
+              </span>
+              <span aria-hidden="true">{type.emoji}</span>
+              <strong>{type.name}</strong>
+            </label>
+          );
+        })}
+      </div>
+    </details>
   );
 }
 
@@ -2525,7 +2595,12 @@ function Settings({
 }) {
   const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [newType, setNewType] = useState('');
-  const [newTypeEmoji, setNewTypeEmoji] = useState('🏷️');
+  const [newTypeEmoji, setNewTypeEmoji] = useState<string>(DEFAULT_TYPE_EMOJI);
+  const [typeEdit, setTypeEdit] = useState<{
+    id: string;
+    name: string;
+    emoji: string;
+  } | null>(null);
   const [newValue, setNewValue] = useState<Record<string, string>>({});
   const [renameTarget, setRenameTarget] = useState<{
     label: string;
@@ -2537,15 +2612,15 @@ function Settings({
   const [labelForm, setLabelForm] = useState<{
     name: string;
     scope: 'universal' | 'type';
-    gatedTypeId: string;
-    valueKind: 'enum' | 'user_managed';
+    gatedTypeIds: string[];
     cardinality: 'single' | 'multi';
+    quickFilter: boolean;
   }>({
     name: '',
     scope: 'universal',
-    gatedTypeId: '',
-    valueKind: 'enum',
+    gatedTypeIds: [],
     cardinality: 'single',
+    quickFilter: false,
   });
   const addType = (event: FormEvent) => {
     event.preventDefault();
@@ -2553,10 +2628,21 @@ function Settings({
     void mutate(async () => {
       await todoApi.createType({
         name: newType.trim(),
-        emoji: newTypeEmoji.trim() || '🏷️',
+        emoji: newTypeEmoji,
       });
       setNewType('');
-      setNewTypeEmoji('🏷️');
+      setNewTypeEmoji(DEFAULT_TYPE_EMOJI);
+    });
+  };
+  const submitTypeEdit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!typeEdit?.name.trim()) return;
+    void mutate(async () => {
+      await todoApi.updateType(typeEdit.id, {
+        name: typeEdit.name.trim(),
+        emoji: typeEdit.emoji,
+      });
+      setTypeEdit(null);
     });
   };
   const addLabel = (event: FormEvent) => {
@@ -2566,14 +2652,14 @@ function Settings({
       await todoApi.createLabel({
         ...labelForm,
         name: labelForm.name.trim(),
-        gatedTypeId: labelForm.scope === 'type' ? labelForm.gatedTypeId : null,
+        gatedTypeIds: labelForm.scope === 'type' ? labelForm.gatedTypeIds : [],
       });
       setLabelForm({
         name: '',
         scope: 'universal',
-        gatedTypeId: '',
-        valueKind: 'enum',
+        gatedTypeIds: [],
         cardinality: 'single',
+        quickFilter: false,
       });
     });
   };
@@ -2610,6 +2696,10 @@ function Settings({
       setFtueComplete(complete);
     });
   };
+  const typeEmojiOptions: ReadonlyArray<readonly [string, string]> =
+    typeEdit && !TYPE_EMOJI_OPTIONS.some(([emoji]) => emoji === typeEdit.emoji)
+      ? [[typeEdit.emoji, 'Current icon'], ...TYPE_EMOJI_OPTIONS]
+      : TYPE_EMOJI_OPTIONS;
   return (
     <section className="settings-page">
       <header className="settings-head">
@@ -2669,13 +2759,9 @@ function Settings({
               <div className="settings-list">
                 {data.types.map((type) => (
                   <div className="settings-row" key={type.id}>
-                    <TypeEmojiEditor
-                      type={type}
-                      busy={busy}
-                      onSave={(emoji) =>
-                        mutate(() => todoApi.updateType(type.id, { emoji }))
-                      }
-                    />
+                    <span className="type-icon-display" aria-hidden="true">
+                      {type.emoji}
+                    </span>
                     <div>
                       <strong>{type.name}</strong>
                       <small>
@@ -2689,12 +2775,14 @@ function Settings({
                     <button
                       className="secondary"
                       onClick={() =>
-                        startRename('task type', type.name, (name) =>
-                          todoApi.updateType(type.id, { name }),
-                        )
+                        setTypeEdit({
+                          id: type.id,
+                          name: type.name,
+                          emoji: type.emoji,
+                        })
                       }
                     >
-                      Rename
+                      Edit
                     </button>
                     <button
                       className="icon-button danger"
@@ -2718,14 +2806,6 @@ function Settings({
               </div>
               <form className="inline-create type-create" onSubmit={addType}>
                 <input
-                  className="new-type-emoji"
-                  aria-label="New type emoji"
-                  value={newTypeEmoji}
-                  maxLength={16}
-                  onChange={(event) => setNewTypeEmoji(event.target.value)}
-                  onFocus={(event) => event.currentTarget.select()}
-                />
-                <input
                   value={newType}
                   onChange={(event) => setNewType(event.target.value)}
                   placeholder="New type name"
@@ -2734,6 +2814,32 @@ function Settings({
                   <Icon name="plus" />
                   Add type
                 </button>
+                {newType.trim() && (
+                  <fieldset className="emoji-selector-field type-create-emoji">
+                    <legend>Icon</legend>
+                    <p>Choose an icon for this task type.</p>
+                    <div
+                      className="emoji-selector"
+                      role="radiogroup"
+                      aria-label="New task type icon"
+                    >
+                      {TYPE_EMOJI_OPTIONS.map(([emoji, label]) => (
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={newTypeEmoji === emoji}
+                          aria-label={label}
+                          title={label}
+                          className={newTypeEmoji === emoji ? 'active' : ''}
+                          key={`${emoji}:${label}`}
+                          onClick={() => setNewTypeEmoji(emoji)}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  </fieldset>
+                )}
               </form>
             </>
           )}
@@ -2793,15 +2899,47 @@ function Settings({
                           </div>
                           <small>
                             {label.scope === 'universal'
-                              ? 'Universal'
-                              : `For ${data.types.find((type) => type.id === label.gatedTypeId)?.name ?? 'type'} only`}{' '}
+                              ? 'All task types'
+                              : `For ${data.types
+                                  .filter((type) =>
+                                    label.gatedTypeIds.includes(type.id),
+                                  )
+                                  .map((type) => type.name)
+                                  .join(', ')}`}{' '}
                             · {label.cardinality}
+                            {label.quickFilter ? ' · quick filter' : ''}
                           </small>
                         </div>
                       </div>
                       <span>{label.values.length} values</span>
                     </summary>
                     <div className="values">
+                      <label className="quick-filter-setting">
+                        <span>
+                          <strong>Quick filter</strong>
+                          <small>
+                            Show this label’s values above applicable task
+                            views.
+                          </small>
+                        </span>
+                        <input
+                          type="checkbox"
+                          role="switch"
+                          aria-label={`Enable quick filter for ${label.name}`}
+                          checked={label.quickFilter}
+                          disabled={busy}
+                          onChange={(event) => {
+                            const quickFilter = event.currentTarget.checked;
+                            void mutate(() =>
+                              todoApi.updateLabel(label.id, { quickFilter }),
+                            );
+                          }}
+                        />
+                        <span
+                          className="quick-filter-switch"
+                          aria-hidden="true"
+                        />
+                      </label>
                       <div className="value-list">
                         {label.values.map((value) => (
                           <div key={value.id}>
@@ -2855,11 +2993,7 @@ function Settings({
                               [label.id]: event.target.value,
                             })
                           }
-                          placeholder={
-                            label.valueKind === 'user_managed'
-                              ? 'Add a person or value'
-                              : 'Add a value'
-                          }
+                          placeholder="Add a value"
                         />
                         <button className="secondary">Add</button>
                       </form>
@@ -2870,7 +3004,7 @@ function Settings({
               <form className="new-label" onSubmit={addLabel}>
                 <h3>Create a label</h3>
                 <div className="form-grid">
-                  <label className="field">
+                  <label className="field new-label-name">
                     <span>Name</span>
                     <input
                       value={labelForm.name}
@@ -2880,89 +3014,130 @@ function Settings({
                       placeholder="e.g. Product"
                     />
                   </label>
-                  <label className="field">
+                  <div className="field label-choice-field">
                     <span className="field-heading">
                       Visibility
-                      <FieldHelp text="Controls where this label is available. “All task types” shows it on every task; “One task type” only shows it when that type is selected." />
+                      <FieldHelp text="Controls where this label is available. “All task types” shows it on every task; “Specific task types” lets you choose one or more types." />
                     </span>
-                    <select
-                      value={labelForm.scope}
-                      onChange={(event) =>
-                        setLabelForm({
-                          ...labelForm,
-                          scope: event.target.value as 'universal' | 'type',
-                        })
-                      }
+                    <div
+                      className="label-choice-group"
+                      role="radiogroup"
+                      aria-label="Label visibility"
                     >
-                      <option value="universal">All task types</option>
-                      <option value="type">One task type</option>
-                    </select>
-                  </label>
-                  {labelForm.scope === 'type' && (
-                    <label className="field">
-                      <span>Task type</span>
-                      <select
-                        value={labelForm.gatedTypeId}
-                        onChange={(event) =>
-                          setLabelForm({
-                            ...labelForm,
-                            gatedTypeId: event.target.value,
-                          })
-                        }
-                      >
-                        <option value="">Choose…</option>
-                        {data.types.map((type) => (
-                          <option key={type.id} value={type.id}>
-                            {type.emoji} {type.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
-                  <label className="field">
+                      {(
+                        [
+                          [
+                            'universal',
+                            'All task types',
+                            'Available on every task.',
+                          ],
+                          [
+                            'type',
+                            'Specific task types',
+                            'Choose one or more types.',
+                          ],
+                        ] as const
+                      ).map(([value, title, description]) => (
+                        <label key={value}>
+                          <input
+                            type="radio"
+                            name="label-visibility"
+                            value={value}
+                            checked={labelForm.scope === value}
+                            onChange={() =>
+                              setLabelForm({ ...labelForm, scope: value })
+                            }
+                          />
+                          <span className="label-choice-radio" />
+                          <span>
+                            <strong>{title}</strong>
+                            <small>{description}</small>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                    {labelForm.scope === 'type' && (
+                      <div className="field type-scope-field">
+                        <span>Task types</span>
+                        <TaskTypeMultiSelect
+                          types={data.types}
+                          selected={labelForm.gatedTypeIds}
+                          onChange={(gatedTypeIds) =>
+                            setLabelForm({ ...labelForm, gatedTypeIds })
+                          }
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <div className="field label-choice-field">
                     <span className="field-heading">
                       Selection
                       <FieldHelp text="Controls how many values a task can carry for this label. Single allows one choice; multiple allows any number of choices." />
                     </span>
-                    <select
-                      value={labelForm.cardinality}
-                      onChange={(event) =>
-                        setLabelForm({
-                          ...labelForm,
-                          cardinality: event.target.value as 'single' | 'multi',
-                        })
-                      }
+                    <div
+                      className="label-choice-group"
+                      role="radiogroup"
+                      aria-label="Label selection"
                     >
-                      <option value="single">Single value</option>
-                      <option value="multi">Multiple values</option>
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span className="field-heading">
-                      Values
-                      <FieldHelp text="Controls the kind of choices this label represents. A fixed list is a stable set of options; managed values suit evolving lists such as People. Both are maintained in Settings." />
+                      {(
+                        [
+                          ['single', 'Single value', 'A task can choose one.'],
+                          [
+                            'multi',
+                            'Multiple values',
+                            'A task can choose any number.',
+                          ],
+                        ] as const
+                      ).map(([value, title, description]) => (
+                        <label key={value}>
+                          <input
+                            type="radio"
+                            name="label-selection"
+                            value={value}
+                            checked={labelForm.cardinality === value}
+                            onChange={() =>
+                              setLabelForm({
+                                ...labelForm,
+                                cardinality: value,
+                              })
+                            }
+                          />
+                          <span className="label-choice-radio" />
+                          <span>
+                            <strong>{title}</strong>
+                            <small>{description}</small>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <label className="quick-filter-setting quick-filter-create">
+                    <span>
+                      <strong>Quick filter</strong>
+                      <small>
+                        Keep these values available above applicable task views.
+                      </small>
                     </span>
-                    <select
-                      value={labelForm.valueKind}
+                    <input
+                      type="checkbox"
+                      role="switch"
+                      checked={labelForm.quickFilter}
                       onChange={(event) =>
                         setLabelForm({
                           ...labelForm,
-                          valueKind: event.target.value as
-                            | 'enum'
-                            | 'user_managed',
+                          quickFilter: event.currentTarget.checked,
                         })
                       }
-                    >
-                      <option value="enum">Fixed list</option>
-                      <option value="user_managed">Managed as you work</option>
-                    </select>
+                    />
+                    <span className="quick-filter-switch" aria-hidden="true" />
                   </label>
                 </div>
                 <button
                   className="primary"
                   disabled={
                     !labelForm.name.trim() ||
-                    (labelForm.scope === 'type' && !labelForm.gatedTypeId)
+                    (labelForm.scope === 'type' &&
+                      labelForm.gatedTypeIds.length === 0)
                   }
                 >
                   Create label
@@ -3031,22 +3206,13 @@ function Settings({
                     </button>
                     <button
                       className="secondary"
-                      onClick={async () => {
-                        const confirmed = await requestConfirmation({
-                          title: 'Restore the newest snapshot?',
-                          message:
-                            'Your current local database will be replaced by the newest backup. Changes made since that snapshot will be lost.',
-                          confirmLabel: 'Restore snapshot',
-                          danger: true,
-                        });
-                        if (confirmed) {
-                          void mutate(async () =>
-                            onBackupChange(await todoApi.restoreLatestBackup()),
-                          );
-                        }
-                      }}
+                      onClick={() =>
+                        void mutate(async () =>
+                          onBackupChange(await todoApi.restoreFromBackup()),
+                        )
+                      }
                     >
-                      Restore latest
+                      Restore from backup
                     </button>
                   </>
                 )}
@@ -3173,6 +3339,96 @@ function Settings({
           )}
         </div>
       </div>
+      {typeEdit && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !busy)
+              setTypeEdit(null);
+          }}
+        >
+          <section
+            className="modal type-edit-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="type-edit-title"
+          >
+            <header>
+              <div>
+                <p className="eyebrow">Edit task type</p>
+                <h2 id="type-edit-title">Name and icon</h2>
+              </div>
+              <button
+                className="icon-button large"
+                onClick={() => setTypeEdit(null)}
+                aria-label="Close"
+                disabled={busy}
+              >
+                <Icon name="x" />
+              </button>
+            </header>
+            <form onSubmit={submitTypeEdit}>
+              <div className="form-scroll type-edit-fields">
+                <label className="field title-field">
+                  <span>Name</span>
+                  <input
+                    autoFocus
+                    value={typeEdit.name}
+                    onChange={(event) =>
+                      setTypeEdit({
+                        ...typeEdit,
+                        name: event.currentTarget.value,
+                      })
+                    }
+                    onFocus={(event) => event.currentTarget.select()}
+                  />
+                </label>
+                <fieldset className="emoji-selector-field">
+                  <legend>Icon</legend>
+                  <p>Choose an icon for this task type.</p>
+                  <div
+                    className="emoji-selector"
+                    role="radiogroup"
+                    aria-label="Task type icon"
+                  >
+                    {typeEmojiOptions.map(([emoji, label]) => (
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={typeEdit.emoji === emoji}
+                        aria-label={label}
+                        title={label}
+                        className={typeEdit.emoji === emoji ? 'active' : ''}
+                        key={`${emoji}:${label}`}
+                        onClick={() => setTypeEdit({ ...typeEdit, emoji })}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+              </div>
+              <footer>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setTypeEdit(null)}
+                  disabled={busy}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="primary"
+                  disabled={!typeEdit.name.trim() || busy}
+                >
+                  {busy ? 'Saving…' : 'Save changes'}
+                </button>
+              </footer>
+            </form>
+          </section>
+        </div>
+      )}
       {renameTarget && (
         <div
           className="modal-backdrop"

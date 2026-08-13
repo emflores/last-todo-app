@@ -12,7 +12,6 @@ import type {
   LabelScope,
   Todo,
   TodoDraft,
-  ValueKind,
 } from './types';
 
 export interface TodoAPI {
@@ -31,11 +30,14 @@ export interface TodoAPI {
   createLabel(input: {
     name: string;
     scope: LabelScope;
-    gatedTypeId: string | null;
-    valueKind: ValueKind;
+    gatedTypeIds: string[];
     cardinality: Cardinality;
+    quickFilter: boolean;
   }): Promise<void>;
-  updateLabel(id: string, input: { name: string }): Promise<void>;
+  updateLabel(
+    id: string,
+    input: { name?: string; quickFilter?: boolean },
+  ): Promise<void>;
   deleteLabel(id: string): Promise<void>;
   createLabelValue(labelId: string, input: { value: string }): Promise<void>;
   updateLabelValue(id: string, input: { value: string }): Promise<void>;
@@ -43,7 +45,7 @@ export interface TodoAPI {
   getBackupStatus(): Promise<BackupStatus>;
   chooseBackupFolder(): Promise<BackupStatus>;
   runBackup(): Promise<BackupStatus>;
-  restoreLatestBackup(): Promise<BackupStatus>;
+  restoreFromBackup(): Promise<BackupStatus>;
   checkForUpdates(): Promise<UpdateStatus>;
   openUpdateDownload(): Promise<void>;
   getOnboardingStatus(): Promise<{ complete: boolean }>;
@@ -137,7 +139,18 @@ export const todoApi: TodoAPI = {
       bridge().listTodos({ includeCompleted: true }),
       bridge().listTaxonomy(),
     ]);
-    cachedData = { todos: normalizeAll(todos), ...taxonomy };
+    cachedData = {
+      todos: normalizeAll(todos),
+      types: taxonomy.types,
+      labels: taxonomy.labels.map((label) => ({
+        ...label,
+        // Keep an in-flight renderer refresh from taking down the whole UI if
+        // the main process is briefly serving the pre-multi-type label shape.
+        gatedTypeIds: Array.isArray(label.gatedTypeIds)
+          ? label.gatedTypeIds
+          : [],
+      })),
+    };
     return cachedData;
   },
   async createTodo(input) {
@@ -189,7 +202,7 @@ export const todoApi: TodoAPI = {
     if (status.lastError) throw new Error(status.lastError);
     return status;
   },
-  restoreLatestBackup: () => bridge().restoreLatestBackup(),
+  restoreFromBackup: () => bridge().restoreFromBackup(),
   checkForUpdates: () => bridge().checkForUpdates(),
   openUpdateDownload: () => bridge().openUpdateDownload(),
   getOnboardingStatus: () => bridge().getOnboardingStatus(),

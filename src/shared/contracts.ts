@@ -1,5 +1,4 @@
 export type LabelScope = 'universal' | 'type';
-export type LabelValueKind = 'enum' | 'user_managed';
 export type LabelCardinality = 'single' | 'multi';
 
 export interface TodoType {
@@ -20,9 +19,9 @@ export interface LabelDefinition {
   id: string;
   name: string;
   scope: LabelScope;
-  gatedTypeId: string | null;
-  valueKind: LabelValueKind;
+  gatedTypeIds: string[];
   cardinality: LabelCardinality;
+  quickFilter: boolean;
   sortOrder: number;
   values: LabelValue[];
 }
@@ -123,9 +122,9 @@ export interface UpdateTypeInput {
 export interface CreateLabelInput {
   name: string;
   scope: LabelScope;
-  gatedTypeId?: string | null;
-  valueKind: LabelValueKind;
+  gatedTypeIds?: string[];
   cardinality: LabelCardinality;
+  quickFilter?: boolean;
   sortOrder?: number;
 }
 export type UpdateLabelInput = Partial<CreateLabelInput>;
@@ -193,7 +192,7 @@ export const IPC_CHANNELS = {
   getBackupStatus: 'backups:status',
   chooseBackupFolder: 'backups:choose-folder',
   runBackupNow: 'backups:run-now',
-  restoreLatestBackup: 'backups:restore-latest',
+  restoreFromBackup: 'backups:restore-from-backup',
   checkForUpdates: 'updates:check',
   openUpdateDownload: 'updates:open-download',
   getOnboardingStatus: 'onboarding:status',
@@ -226,7 +225,7 @@ export interface TodoAPI {
   getBackupStatus(): Promise<BackupStatus>;
   chooseBackupFolder(): Promise<BackupStatus>;
   runBackupNow(): Promise<BackupStatus>;
-  restoreLatestBackup(): Promise<BackupStatus>;
+  restoreFromBackup(): Promise<BackupStatus>;
   checkForUpdates(): Promise<UpdateStatus>;
   openUpdateDownload(): Promise<void>;
   getOnboardingStatus(): Promise<{ complete: boolean }>;

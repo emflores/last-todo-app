@@ -20,6 +20,14 @@ function name(value: string): string {
   return trimmed;
 }
 
+function comparableValue(value: string): string {
+  return value.normalize('NFKC').toLowerCase();
+}
+
+function uniqueTypeIds(values: string[] | undefined): string[] {
+  return [...new Set(values ?? [])];
+}
+
 function emoji(value: string | undefined): string {
   const trimmed = value?.trim() || '🏷️';
   if (Array.from(trimmed).length > 8) throw new Error('Emoji is too long');
@@ -47,8 +55,8 @@ export class TaxonomyService {
       name: string;
       scope: 'universal' | 'type';
       gated_type_id: string | null;
-      value_kind: 'enum' | 'user_managed';
       cardinality: 'single' | 'multi';
+      quick_filter: number;
       sort_order: number;
     }>;
     const values = this.database.db
@@ -61,6 +69,9 @@ export class TaxonomyService {
       value: string;
       sort_order: number;
     }>;
+    const labelTypes = this.database.db
+      .prepare('SELECT label_id,type_id FROM label_types ORDER BY type_id')
+      .all() as Array<{ label_id: string; type_id: string }>;
     return {
       types: types.map((type) => ({
         id: type.id,
@@ -72,9 +83,11 @@ export class TaxonomyService {
         id: label.id,
         name: label.name,
         scope: label.scope,
-        gatedTypeId: label.gated_type_id,
-        valueKind: label.value_kind,
+        gatedTypeIds: labelTypes
+          .filter((item) => item.label_id === label.id)
+          .map((item) => item.type_id),
         cardinality: label.cardinality,
+        quickFilter: Boolean(label.quick_filter),
         sortOrder: label.sort_order,
         values: values
           .filter((value) => value.label_id === label.id)
@@ -90,13 +103,15 @@ export class TaxonomyService {
 
   async createType(input: CreateTypeInput): Promise<TodoType> {
     const id = randomUUID();
-    await this.database.write((db) =>
+    await this.database.write((db) => {
+      const typeName = name(input.name);
+      this.assertUniqueTypeName(db, typeName);
       db
         .prepare(
           'INSERT INTO types (id,name,emoji,sort_order) VALUES (?,?,?,?)',
         )
-        .run(id, name(input.name), emoji(input.emoji), input.sortOrder ?? 0),
-    );
+        .run(id, typeName, emoji(input.emoji), input.sortOrder ?? 0);
+    });
     return this.type(id);
   }
 
@@ -106,8 +121,10 @@ export class TaxonomyService {
         | { name: string; emoji: string; sort_order: number }
         | undefined;
       if (!old) throw new Error('Type not found');
+      const typeName = input.name === undefined ? old.name : name(input.name);
+      this.assertUniqueTypeName(db, typeName, id);
       db.prepare('UPDATE types SET name=?,emoji=?,sort_order=? WHERE id=?').run(
-        input.name === undefined ? old.name : name(input.name),
+        typeName,
         input.emoji === undefined ? old.emoji : emoji(input.emoji),
         input.sortOrder ?? old.sort_order,
         id,
@@ -133,19 +150,25 @@ export class TaxonomyService {
   async createLabel(input: CreateLabelInput): Promise<LabelDefinition> {
     const id = randomUUID();
     await this.database.write((db) => {
-      this.validateLabel(db, input.scope, input.gatedTypeId, input.cardinality);
+      const labelName = name(input.name);
+      this.assertUniqueLabelName(db, labelName);
+      const gatedTypeIds =
+        input.scope === 'type' ? uniqueTypeIds(input.gatedTypeIds) : [];
+      this.validateLabel(db, input.scope, gatedTypeIds, input.cardinality);
       db.prepare(
         `INSERT INTO labels
-        (id,name,scope,gated_type_id,value_kind,cardinality,sort_order) VALUES (?,?,?,?,?,?,?)`,
+        (id,name,scope,gated_type_id,value_kind,cardinality,quick_filter,sort_order)
+        VALUES (?,?,?,?,'enum',?,?,?)`,
       ).run(
         id,
-        name(input.name),
+        labelName,
         input.scope,
-        input.scope === 'type' ? input.gatedTypeId : null,
-        input.valueKind,
+        gatedTypeIds[0] ?? null,
         input.cardinality,
+        input.quickFilter ? 1 : 0,
         input.sortOrder ?? 0,
       );
+      this.replaceLabelTypes(db, id, gatedTypeIds);
     });
     return this.label(id);
   }
@@ -160,30 +183,32 @@ export class TaxonomyService {
             name: string;
             scope: 'universal' | 'type';
             gated_type_id: string | null;
-            value_kind: 'enum' | 'user_managed';
             cardinality: 'single' | 'multi';
+            quick_filter: number;
             sort_order: number;
           }
         | undefined;
       if (!old) throw new Error('Label not found');
+      const labelName = input.name === undefined ? old.name : name(input.name);
+      this.assertUniqueLabelName(db, labelName, id);
       const scope = input.scope ?? old.scope;
-      const gatedTypeId =
+      const gatedTypeIds =
         scope === 'type'
-          ? input.gatedTypeId === undefined
-            ? old.gated_type_id
-            : input.gatedTypeId
-          : null;
+          ? input.gatedTypeIds === undefined
+            ? this.labelTypeIds(db, id)
+            : uniqueTypeIds(input.gatedTypeIds)
+          : [];
       const cardinality = input.cardinality ?? old.cardinality;
-      this.validateLabel(db, scope, gatedTypeId, cardinality);
+      this.validateLabel(db, scope, gatedTypeIds, cardinality);
       if (scope === 'type') {
-        const incompatible = db
+        const assignedTypes = db
           .prepare(
-            `SELECT 1 FROM todo_labels tl JOIN todos t ON t.id=tl.todo_id
-          WHERE tl.label_id=? AND t.type_id<>? LIMIT 1`,
+            `SELECT DISTINCT t.type_id FROM todo_labels tl
+            JOIN todos t ON t.id=tl.todo_id WHERE tl.label_id=?`,
           )
-          .get(id, gatedTypeId);
-        if (incompatible)
-          throw new Error('Label is assigned to todos of another type');
+          .all(id) as Array<{ type_id: string }>;
+        if (assignedTypes.some((item) => !gatedTypeIds.includes(item.type_id)))
+          throw new Error('Label is assigned to todos of another task type');
       }
       if (cardinality === 'single') {
         const multiple = db
@@ -196,17 +221,22 @@ export class TaxonomyService {
           throw new Error('Some todos have multiple values for this label');
       }
       db.prepare(
-        `UPDATE labels SET name=?,scope=?,gated_type_id=?,value_kind=?,cardinality=?,sort_order=?
+        `UPDATE labels SET name=?,scope=?,gated_type_id=?,cardinality=?,quick_filter=?,sort_order=?
         WHERE id=?`,
       ).run(
-        input.name === undefined ? old.name : name(input.name),
+        labelName,
         scope,
-        gatedTypeId,
-        input.valueKind ?? old.value_kind,
+        gatedTypeIds[0] ?? null,
         cardinality,
+        input.quickFilter === undefined
+          ? old.quick_filter
+          : input.quickFilter
+            ? 1
+            : 0,
         input.sortOrder ?? old.sort_order,
         id,
       );
+      this.replaceLabelTypes(db, id, gatedTypeIds);
     });
     return this.label(id);
   }
@@ -230,9 +260,11 @@ export class TaxonomyService {
     await this.database.write((db) => {
       if (!db.prepare('SELECT 1 FROM labels WHERE id=?').get(input.labelId))
         throw new Error('Label not found');
+      const value = name(input.value);
+      this.assertUniqueValue(db, input.labelId, value);
       db.prepare(
         'INSERT INTO label_values (id,label_id,value,sort_order) VALUES (?,?,?,?)',
-      ).run(id, input.labelId, name(input.value), input.sortOrder ?? 0);
+      ).run(id, input.labelId, value, input.sortOrder ?? 0);
     });
     return this.value(id);
   }
@@ -244,10 +276,14 @@ export class TaxonomyService {
     await this.database.write((db) => {
       const old = db
         .prepare('SELECT * FROM label_values WHERE id=?')
-        .get(id) as { value: string; sort_order: number } | undefined;
+        .get(id) as
+        | { label_id: string; value: string; sort_order: number }
+        | undefined;
       if (!old) throw new Error('Label value not found');
+      const value = input.value === undefined ? old.value : name(input.value);
+      this.assertUniqueValue(db, old.label_id, value, id);
       db.prepare('UPDATE label_values SET value=?,sort_order=? WHERE id=?').run(
-        input.value === undefined ? old.value : name(input.value),
+        value,
         input.sortOrder ?? old.sort_order,
         id,
       );
@@ -269,6 +305,60 @@ export class TaxonomyService {
         throw error;
       }
     });
+  }
+
+  private assertUniqueValue(
+    db: Database.Database,
+    labelId: string,
+    value: string,
+    excludeId?: string,
+  ): void {
+    const existing = db
+      .prepare('SELECT id,value FROM label_values WHERE label_id=?')
+      .all(labelId) as Array<{ id: string; value: string }>;
+    const duplicate = existing.some(
+      (candidate) =>
+        candidate.id !== excludeId &&
+        comparableValue(candidate.value) === comparableValue(value),
+    );
+    if (duplicate)
+      throw new Error('Label values must be unique, regardless of case');
+  }
+
+  private assertUniqueLabelName(
+    db: Database.Database,
+    labelName: string,
+    excludeId?: string,
+  ): void {
+    const labels = db.prepare('SELECT id,name FROM labels').all() as Array<{
+      id: string;
+      name: string;
+    }>;
+    const duplicate = labels.some(
+      (label) =>
+        label.id !== excludeId &&
+        comparableValue(label.name) === comparableValue(labelName),
+    );
+    if (duplicate)
+      throw new Error('Label names must be unique, regardless of case');
+  }
+
+  private assertUniqueTypeName(
+    db: Database.Database,
+    typeName: string,
+    excludeId?: string,
+  ): void {
+    const types = db.prepare('SELECT id,name FROM types').all() as Array<{
+      id: string;
+      name: string;
+    }>;
+    const duplicate = types.some(
+      (type) =>
+        type.id !== excludeId &&
+        comparableValue(type.name) === comparableValue(typeName),
+    );
+    if (duplicate)
+      throw new Error('Task type names must be unique, regardless of case');
   }
 
   private type(id: string): TodoType {
@@ -303,19 +393,40 @@ export class TaxonomyService {
   private validateLabel(
     db: Database.Database,
     scope: string,
-    gatedTypeId: string | null | undefined,
+    gatedTypeIds: string[],
     cardinality: string,
   ): void {
     if (!['universal', 'type'].includes(scope))
       throw new Error('Invalid label scope');
     if (!['single', 'multi'].includes(cardinality))
       throw new Error('Invalid label cardinality');
+    if (scope === 'type' && gatedTypeIds.length === 0)
+      throw new Error('A type-scoped label requires at least one task type');
     if (
-      scope === 'type' &&
-      (!gatedTypeId ||
-        !db.prepare('SELECT 1 FROM types WHERE id=?').get(gatedTypeId))
-    ) {
-      throw new Error('A type-scoped label requires a valid type');
-    }
+      gatedTypeIds.some(
+        (typeId) => !db.prepare('SELECT 1 FROM types WHERE id=?').get(typeId),
+      )
+    )
+      throw new Error('A type-scoped label includes an invalid task type');
+  }
+
+  private labelTypeIds(db: Database.Database, labelId: string): string[] {
+    return (
+      db
+        .prepare('SELECT type_id FROM label_types WHERE label_id=?')
+        .all(labelId) as Array<{ type_id: string }>
+    ).map((item) => item.type_id);
+  }
+
+  private replaceLabelTypes(
+    db: Database.Database,
+    labelId: string,
+    typeIds: string[],
+  ): void {
+    db.prepare('DELETE FROM label_types WHERE label_id=?').run(labelId);
+    const insert = db.prepare(
+      'INSERT INTO label_types (label_id,type_id) VALUES (?,?)',
+    );
+    for (const typeId of typeIds) insert.run(labelId, typeId);
   }
 }

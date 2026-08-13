@@ -370,17 +370,21 @@ export class TodoService {
         throw new Error('A label may only be specified once');
       seen.add(selection.labelId);
       const label = db
-        .prepare('SELECT * FROM labels WHERE id=?')
+        .prepare('SELECT id,scope,cardinality FROM labels WHERE id=?')
         .get(selection.labelId) as
         | {
             id: string;
             scope: string;
-            gated_type_id: string | null;
             cardinality: string;
           }
         | undefined;
       if (!label) throw new Error('Label not found');
-      if (label.scope === 'type' && label.gated_type_id !== typeId) {
+      if (
+        label.scope === 'type' &&
+        !db
+          .prepare('SELECT 1 FROM label_types WHERE label_id=? AND type_id=?')
+          .get(selection.labelId, typeId)
+      ) {
         throw new Error('This label is not available for the selected type');
       }
       const values = [...new Set(selection.valueIds)];
@@ -412,7 +416,11 @@ export class TodoService {
     const invalid = db
       .prepare(
         `SELECT 1 FROM todo_labels tl JOIN labels l ON l.id=tl.label_id
-      WHERE tl.todo_id=? AND l.scope='type' AND l.gated_type_id<>? LIMIT 1`,
+        WHERE tl.todo_id=? AND l.scope='type'
+        AND NOT EXISTS (
+          SELECT 1 FROM label_types lt
+          WHERE lt.label_id=l.id AND lt.type_id=?
+        ) LIMIT 1`,
       )
       .get(todoId, typeId);
     if (invalid)

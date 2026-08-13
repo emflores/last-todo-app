@@ -46,8 +46,7 @@ const todoAPI = {
   getBackupStatus: () => ipcRenderer.invoke(IPC_CHANNELS.getBackupStatus),
   chooseBackupFolder: () => ipcRenderer.invoke(IPC_CHANNELS.chooseBackupFolder),
   runBackupNow: () => ipcRenderer.invoke(IPC_CHANNELS.runBackupNow),
-  restoreLatestBackup: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.restoreLatestBackup),
+  restoreFromBackup: () => ipcRenderer.invoke(IPC_CHANNELS.restoreFromBackup),
   checkForUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.checkForUpdates),
   openUpdateDownload: () => ipcRenderer.invoke(IPC_CHANNELS.openUpdateDownload),
   getOnboardingStatus: () =>

@@ -124,9 +124,44 @@ export class BackupService {
     return this.status();
   }
 
-  async restoreLatest(): Promise<BackupStatus> {
-    const snapshot = BackupService.findNewest(this.settings.backupFolder);
-    if (!snapshot) throw new Error('No backup snapshot is available');
+  async restoreFromBackup(): Promise<BackupStatus> {
+    const folder = this.settings.backupFolder;
+    if (!folder) throw new Error('Choose a backup folder first');
+    const directory = path.join(folder, 'backups');
+    fs.mkdirSync(directory, { recursive: true });
+
+    // Loaded only for this UI action so headless backup tests do not require Electron.
+    const { dialog } = await import('electron');
+    const selection = await dialog.showOpenDialog({
+      title: 'Restore from backup',
+      defaultPath: directory,
+      buttonLabel: 'Choose backup',
+      filters: [{ name: 'LastTodo backups', extensions: ['db'] }],
+      properties: ['openFile'],
+    });
+    const snapshot = selection.filePaths[0];
+    if (selection.canceled || !snapshot) return this.status();
+
+    const confirmation = await dialog.showMessageBox({
+      type: 'warning',
+      title: 'Restore from backup?',
+      message: `Restore ${path.basename(snapshot)}?`,
+      detail:
+        'Your current local database will be replaced. Changes made since this backup was created will be lost.',
+      buttons: ['Cancel', 'Restore backup'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (confirmation.response !== 1) return this.status();
+    return this.restoreFrom(snapshot);
+  }
+
+  async restoreFrom(snapshot: string): Promise<BackupStatus> {
+    if (path.extname(snapshot).toLowerCase() !== '.db')
+      throw new Error('Choose a LastTodo database backup');
+    if (!fs.statSync(snapshot).isFile())
+      throw new Error('The selected backup is not a file');
     await this.database.replaceWith(snapshot);
     this.state = {
       lastBackupAt: new Date().toISOString(),

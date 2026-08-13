@@ -1,5 +1,4 @@
 export type LabelScope = 'universal' | 'type';
-export type ValueKind = 'enum' | 'user_managed';
 export type Cardinality = 'single' | 'multi';
 
 export interface TodoType {
@@ -20,9 +19,9 @@ export interface LabelDefinition {
   id: string;
   name: string;
   scope: LabelScope;
-  gatedTypeId: string | null;
-  valueKind: ValueKind;
+  gatedTypeIds: string[];
   cardinality: Cardinality;
+  quickFilter: boolean;
   sortOrder: number;
   values: LabelValue[];
 }
@@ -81,4 +80,4 @@ export interface BackupStatus {
   lastError: string | null;
 }
 
-export type ViewName = 'board' | 'people' | 'settings';
+export type ViewName = 'board' | 'settings';

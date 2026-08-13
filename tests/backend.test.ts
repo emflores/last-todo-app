@@ -51,6 +51,61 @@ describe('backend services', () => {
     expect(
       initial.labels.find((label) => label.name === 'Priority')?.values,
     ).toHaveLength(3);
+    expect(
+      initial.labels.find((label) => label.id === 'label-priority')
+        ?.quickFilter,
+    ).toBe(false);
+    expect(
+      initial.labels.find((label) => label.id === 'label-people')?.quickFilter,
+    ).toBe(true);
+    expect(
+      initial.labels.find((label) => label.id === 'label-people')?.gatedTypeIds,
+    ).toEqual(['type-people']);
+  });
+
+  it('enables the existing People label when quick filters are introduced', () => {
+    const legacyPath = path.join(directory, 'legacy-v4.db');
+    const legacy = new BetterSqlite3(legacyPath);
+    legacy.exec(`
+      CREATE TABLE types (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL
+      );
+      INSERT INTO types (id, name) VALUES ('type-people', 'People');
+      CREATE TABLE labels (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        gated_type_id TEXT,
+        value_kind TEXT NOT NULL,
+        cardinality TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO labels
+        (id, name, scope, gated_type_id, value_kind, cardinality, sort_order)
+      VALUES
+        ('label-people', 'People', 'type', 'type-people', 'user_managed', 'multi', 0),
+        ('label-project', 'Project', 'universal', NULL, 'enum', 'single', 1);
+      PRAGMA user_version = 4;
+    `);
+    legacy.close();
+
+    const upgraded = new AppDatabase(legacyPath);
+    expect(
+      upgraded.db
+        .prepare('SELECT id, quick_filter FROM labels ORDER BY id')
+        .all(),
+    ).toEqual([
+      { id: 'label-people', quick_filter: 1 },
+      { id: 'label-project', quick_filter: 0 },
+    ]);
+    expect(
+      upgraded.db.prepare('SELECT label_id, type_id FROM label_types').all(),
+    ).toEqual([{ label_id: 'label-people', type_id: 'type-people' }]);
+    expect(
+      upgraded.db.prepare('SELECT DISTINCT value_kind FROM labels').all(),
+    ).toEqual([{ value_kind: 'enum' }]);
+    upgraded.close();
   });
 
   it('upgrades existing databases with non-sensitive todos by default', () => {
@@ -64,6 +119,15 @@ describe('backend services', () => {
       );
       INSERT INTO types (id, name, sort_order)
       VALUES ('type-team', 'Team', 0);
+      CREATE TABLE labels (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        gated_type_id TEXT,
+        value_kind TEXT NOT NULL,
+        cardinality TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0
+      );
       CREATE TABLE todos (id TEXT PRIMARY KEY, title TEXT NOT NULL);
       INSERT INTO todos (id, title) VALUES ('legacy-todo', 'Existing task');
       PRAGMA user_version = 2;
@@ -238,25 +302,118 @@ describe('backend services', () => {
     expect((await taxonomy.updateType(type.id, { emoji: '♟️' })).emoji).toBe(
       '♟️',
     );
+    await expect(
+      taxonomy.createType({ name: ' strategy ' }),
+    ).rejects.toThrow('unique');
+    await expect(
+      taxonomy.updateType(type.id, { name: 'STRATEGY' }),
+    ).resolves.toMatchObject({ name: 'STRATEGY' });
+    const otherType = await taxonomy.createType({ name: 'Planning' });
+    await expect(
+      taxonomy.updateType(otherType.id, { name: ' strategy ' }),
+    ).rejects.toThrow('unique');
     const label = await taxonomy.createLabel({
       name: 'Theme',
       scope: 'type',
-      gatedTypeId: type.id,
-      valueKind: 'user_managed',
+      gatedTypeIds: [type.id, 'type-product'],
       cardinality: 'multi',
+      quickFilter: true,
     });
+    expect(label.quickFilter).toBe(true);
+    expect(label.gatedTypeIds).toEqual(
+      expect.arrayContaining([type.id, 'type-product']),
+    );
+    await expect(
+      taxonomy.createLabel({
+        name: ' theme ',
+        scope: 'universal',
+        gatedTypeIds: [],
+        cardinality: 'single',
+      }),
+    ).rejects.toThrow('unique');
+    await expect(
+      taxonomy.updateLabel(label.id, { name: 'THEME' }),
+    ).resolves.toMatchObject({ name: 'THEME' });
+    expect(
+      (await taxonomy.updateLabel(label.id, { quickFilter: false }))
+        .quickFilter,
+    ).toBe(false);
     const value = await taxonomy.createValue({
       labelId: label.id,
       value: 'Growth',
     });
+    await expect(
+      taxonomy.createValue({ labelId: label.id, value: ' growth ' }),
+    ).rejects.toThrow('unique');
+    const retention = await taxonomy.createValue({
+      labelId: label.id,
+      value: 'Retention',
+    });
+    await expect(
+      taxonomy.updateValue(retention.id, { value: 'GROWTH' }),
+    ).rejects.toThrow('unique');
+    const otherLabel = await taxonomy.createLabel({
+      name: 'Outcome',
+      scope: 'universal',
+      gatedTypeIds: [],
+      cardinality: 'single',
+    });
+    await expect(
+      taxonomy.updateLabel(otherLabel.id, { name: ' theme ' }),
+    ).rejects.toThrow('unique');
+    await expect(
+      taxonomy.createValue({ labelId: otherLabel.id, value: 'GROWTH' }),
+    ).resolves.toMatchObject({ value: 'GROWTH' });
     await todos.create({
       title: 'Explore market',
       typeId: type.id,
       dueDate: '2026-09-01',
       labels: [{ labelId: label.id, valueIds: [value.id] }],
     });
+    await expect(
+      todos.create({
+        title: 'Product growth',
+        typeId: 'type-product',
+        dueDate: '2026-09-02',
+        labels: [{ labelId: label.id, valueIds: [value.id] }],
+      }),
+    ).resolves.toMatchObject({ typeId: 'type-product' });
+    await expect(
+      taxonomy.updateLabel(label.id, { gatedTypeIds: [type.id] }),
+    ).rejects.toThrow('another task type');
+    await expect(
+      todos.create({
+        title: 'Operational growth',
+        typeId: 'type-operational',
+        dueDate: '2026-09-03',
+        labels: [{ labelId: label.id, valueIds: [value.id] }],
+      }),
+    ).rejects.toThrow('not available');
     await expect(taxonomy.deleteValue(value.id)).rejects.toThrow('in use');
     await expect(taxonomy.deleteType(type.id)).rejects.toThrow('in use');
+  });
+
+  it('can remove and recreate the seeded People taxonomy as ordinary data', async () => {
+    await taxonomy.deleteLabel('label-people');
+    await taxonomy.deleteType('type-people');
+
+    const type = await taxonomy.createType({ name: 'Contacts', emoji: '📇' });
+    const label = await taxonomy.createLabel({
+      name: 'Owner',
+      scope: 'type',
+      gatedTypeIds: [type.id],
+      cardinality: 'multi',
+      quickFilter: true,
+    });
+
+    expect(
+      taxonomy.list().types.some((candidate) => candidate.id === type.id),
+    ).toBe(true);
+    expect(label).toMatchObject({
+      name: 'Owner',
+      gatedTypeIds: [type.id],
+      quickFilter: true,
+    });
   });
 });
 
@@ -347,7 +504,7 @@ describe('backups', () => {
     await todos.delete(
       todos.list().find((todo) => todo.title === 'After snapshot')!.id,
     );
-    await service.restoreLatest();
+    await service.restoreFrom(first.lastBackupPath!);
     expect(todos.list().some((todo) => todo.title === 'In snapshot')).toBe(
       true,
     );
@@ -368,6 +525,12 @@ describe('backups', () => {
     expect(
       fs.readdirSync(path.dirname(nextDay.lastBackupPath!)).sort(),
     ).toEqual(['todos-daily-2026-08-12.db', 'todos-daily-2026-08-13.db']);
+
+    await service.restoreFrom(first.lastBackupPath!);
+    expect(todos.list().some((todo) => todo.title === 'In snapshot')).toBe(
+      true,
+    );
+    expect(todos.list().some((todo) => todo.title === 'Next day')).toBe(false);
   });
 
   it('removes hourly snapshots and daily snapshots older than 15 calendar days', () => {

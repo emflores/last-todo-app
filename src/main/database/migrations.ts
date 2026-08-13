@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 const DEFAULT_TYPE_EMOJI: Record<string, string> = {
   'type-team': '🤝',
@@ -103,6 +103,28 @@ const migrations: Record<number, (db: Database.Database) => void> = {
     const updateEmoji = db.prepare('UPDATE types SET emoji = ? WHERE id = ?');
     for (const [id, emoji] of Object.entries(DEFAULT_TYPE_EMOJI))
       updateEmoji.run(emoji, id);
+  },
+  5: (db) => {
+    db.exec(
+      'ALTER TABLE labels ADD COLUMN quick_filter INTEGER NOT NULL DEFAULT 0 CHECK (quick_filter IN (0, 1))',
+    );
+    db.prepare('UPDATE labels SET quick_filter=1 WHERE id=?').run(
+      'label-people',
+    );
+  },
+  6: (db) => {
+    db.exec(`
+      CREATE TABLE label_types (
+        label_id TEXT NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+        type_id TEXT NOT NULL REFERENCES types(id),
+        PRIMARY KEY (label_id, type_id)
+      );
+      INSERT INTO label_types (label_id, type_id)
+      SELECT id, gated_type_id FROM labels
+      WHERE scope='type' AND gated_type_id IS NOT NULL;
+      CREATE INDEX idx_label_types_type ON label_types(type_id);
+      UPDATE labels SET value_kind='enum';
+    `);
   },
 };
 
