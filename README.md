@@ -21,7 +21,8 @@ Download the newest build from the
 **[LastTodo Releases page](https://github.com/emflores/last-todo-app/releases/latest)**.
 
 - **Windows:** download and run the installer `.exe`.
-- **macOS:** download the `.dmg`, open it, and drag LastTodo to Applications.
+- **macOS:** choose the Apple Silicon (`arm64`) or Intel (`x64`) `.dmg`, open
+  it, and drag LastTodo to Applications.
 - **Linux:** download the `.deb` for Debian/Ubuntu or the portable `.AppImage`.
 
 Published builds are currently unsigned. macOS Gatekeeper and Windows

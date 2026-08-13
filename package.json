@@ -1,6 +1,6 @@
 {
   "name": "last-todo",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "A local-first desktop todo board with configurable types and labels",
   "homepage": "https://github.com/emflores/last-todo-app",
@@ -87,6 +87,7 @@
     "npmRebuild": true,
     "mac": {
       "icon": "build/icon.icns",
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "target": [
         "dmg",
         "zip"

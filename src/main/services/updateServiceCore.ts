@@ -11,6 +11,7 @@ interface GitHubRelease {
 }
 
 export type UpdatePlatform = 'darwin' | 'linux' | 'win32';
+export type UpdateArchitecture = 'x64' | 'arm64';
 
 const PLATFORM_DOWNLOADS: Record<
   UpdatePlatform,
@@ -80,15 +81,26 @@ export function updateStatusFromRelease(
   currentVersion: string,
   checkedAt: string,
   platform: UpdatePlatform,
+  architecture: UpdateArchitecture,
 ): UpdateStatus {
   const release = parseRelease(value);
   const latestVersion = release.tag_name.replace(/^v/, '');
   const updateAvailable = isNewerVersion(latestVersion, currentVersion);
   const target = PLATFORM_DOWNLOADS[platform];
+  const platformAssets = release.assets.filter((candidate) =>
+    candidate.name.toLowerCase().endsWith(target.extension),
+  );
   const asset = updateAvailable
-    ? release.assets.find((candidate) =>
-        candidate.name.toLowerCase().endsWith(target.extension),
-      )
+    ? platform === 'darwin'
+      ? (platformAssets.find((candidate) =>
+          candidate.name
+            .toLowerCase()
+            .endsWith(`-${architecture}${target.extension}`),
+        ) ??
+        platformAssets.find(
+          (candidate) => !/-(?:arm64|x64)\.dmg$/i.test(candidate.name),
+        ))
+      : platformAssets[0]
     : undefined;
   const downloadUrl = asset
     ? trustedAssetUrl(asset.browser_download_url, target.extension)
@@ -99,7 +111,13 @@ export function updateStatusFromRelease(
     latestVersion,
     updateAvailable: updateAvailable && Boolean(downloadUrl),
     downloadUrl,
-    downloadLabel: downloadUrl ? target.label : null,
+    downloadLabel: downloadUrl
+      ? platform === 'darwin'
+        ? architecture === 'arm64'
+          ? 'Apple Silicon DMG'
+          : 'Intel DMG'
+        : target.label
+      : null,
     checkedAt,
     error:
       updateAvailable && !downloadUrl

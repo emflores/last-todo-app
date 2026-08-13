@@ -26,6 +26,11 @@ jobs:
             platform: mac
             arch: x64
 
+          - name: macOS Apple Silicon
+            os: macos-15
+            platform: mac
+            arch: arm64
+
           - name: Linux x64
             os: ubuntu-latest
             platform: linux
@@ -87,8 +92,6 @@ jobs:
             release/*.zip
             release/*.AppImage
             release/*.deb
-            release/*.blockmap
-            release/latest*.yml
           if-no-files-found: error
           retention-days: 14
 

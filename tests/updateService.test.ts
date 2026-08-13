@@ -15,21 +15,27 @@ describe('manual application updates', () => {
     expect(isNewerVersion('0.0.9', '0.1.0')).toBe(false);
   });
 
-  it('offers a DMG from the LastTodo GitHub release', () => {
+  it('offers the native Apple Silicon DMG from the LastTodo GitHub release', () => {
     const status = updateStatusFromRelease(
       {
         tag_name: 'v0.2.0',
         assets: [
           {
-            name: 'LastTodo-0.2.0.dmg',
+            name: 'LastTodo-0.2.0-mac-x64.dmg',
             browser_download_url:
-              'https://github.com/emflores/last-todo-app/releases/download/v0.2.0/LastTodo-0.2.0.dmg',
+              'https://github.com/emflores/last-todo-app/releases/download/v0.2.0/LastTodo-0.2.0-mac-x64.dmg',
+          },
+          {
+            name: 'LastTodo-0.2.0-mac-arm64.dmg',
+            browser_download_url:
+              'https://github.com/emflores/last-todo-app/releases/download/v0.2.0/LastTodo-0.2.0-mac-arm64.dmg',
           },
         ],
       },
       '0.1.0',
       checkedAt,
       'darwin',
+      'arm64',
     );
 
     expect(status).toEqual({
@@ -37,11 +43,38 @@ describe('manual application updates', () => {
       latestVersion: '0.2.0',
       updateAvailable: true,
       downloadUrl:
-        'https://github.com/emflores/last-todo-app/releases/download/v0.2.0/LastTodo-0.2.0.dmg',
-      downloadLabel: 'DMG',
+        'https://github.com/emflores/last-todo-app/releases/download/v0.2.0/LastTodo-0.2.0-mac-arm64.dmg',
+      downloadLabel: 'Apple Silicon DMG',
       checkedAt,
       error: null,
     });
+  });
+
+  it('offers the Intel DMG to an Intel Mac', () => {
+    const status = updateStatusFromRelease(
+      {
+        tag_name: 'v0.2.0',
+        assets: [
+          {
+            name: 'LastTodo-0.2.0-mac-arm64.dmg',
+            browser_download_url:
+              'https://github.com/emflores/last-todo-app/releases/download/v0.2.0/LastTodo-0.2.0-mac-arm64.dmg',
+          },
+          {
+            name: 'LastTodo-0.2.0-mac-x64.dmg',
+            browser_download_url:
+              'https://github.com/emflores/last-todo-app/releases/download/v0.2.0/LastTodo-0.2.0-mac-x64.dmg',
+          },
+        ],
+      },
+      '0.1.0',
+      checkedAt,
+      'darwin',
+      'x64',
+    );
+
+    expect(status.downloadLabel).toBe('Intel DMG');
+    expect(status.downloadUrl).toMatch(/-x64\.dmg$/);
   });
 
   it('does not expose an untrusted download URL', () => {
@@ -58,6 +91,7 @@ describe('manual application updates', () => {
       '0.1.0',
       checkedAt,
       'darwin',
+      'x64',
     );
 
     expect(status.updateAvailable).toBe(false);
@@ -85,6 +119,7 @@ describe('manual application updates', () => {
       '0.1.0',
       checkedAt,
       'linux',
+      'x64',
     );
 
     expect(status.updateAvailable).toBe(true);
@@ -107,6 +142,7 @@ describe('manual application updates', () => {
       '0.1.0',
       checkedAt,
       'win32',
+      'x64',
     );
 
     expect(status.updateAvailable).toBe(true);
@@ -120,6 +156,7 @@ describe('manual application updates', () => {
       '0.1.0',
       checkedAt,
       'linux',
+      'x64',
     );
 
     expect(status.updateAvailable).toBe(false);

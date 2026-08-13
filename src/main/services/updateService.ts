@@ -50,6 +50,7 @@ export class UpdateService {
         currentVersion,
         checkedAt,
         supportedPlatform(),
+        supportedArchitecture(),
       );
     } catch (error) {
       console.error('Could not check for a LastTodo update:', error);
@@ -76,4 +77,9 @@ function supportedPlatform(): 'darwin' | 'linux' | 'win32' {
   )
     return process.platform;
   throw new Error(`Unsupported update platform: ${process.platform}`);
+}
+
+function supportedArchitecture(): 'x64' | 'arm64' {
+  if (process.arch === 'x64' || process.arch === 'arm64') return process.arch;
+  throw new Error(`Unsupported update architecture: ${process.arch}`);
 }
