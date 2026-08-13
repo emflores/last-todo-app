@@ -47,6 +47,12 @@ interface RescheduleState {
   targetLane: ReschedulableLane;
   proposedDate: string;
 }
+interface TaskCreatedToastState {
+  id: number;
+  currentTypeName: string;
+  createdTypeName: string;
+  hiddenFromCurrentView: boolean;
+}
 type LayoutMode = 'board' | 'list';
 type StatusFilter = 'active' | 'all' | 'completed';
 type DueFilter = 'any' | LaneKey;
@@ -392,6 +398,8 @@ export function App() {
   const [draggingTodoId, setDraggingTodoId] = useState<string | null>(null);
   const [dragOverLane, setDragOverLane] = useState<LaneKey | null>(null);
   const [reschedule, setReschedule] = useState<RescheduleState | null>(null);
+  const [taskCreatedToast, setTaskCreatedToast] =
+    useState<TaskCreatedToastState | null>(null);
 
   const refresh = async () => {
     try {
@@ -475,6 +483,11 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem('lasttodo:layout', layout);
   }, [layout]);
+  useEffect(() => {
+    if (!taskCreatedToast) return;
+    const timeout = window.setTimeout(() => setTaskCreatedToast(null), 6000);
+    return () => window.clearTimeout(timeout);
+  }, [taskCreatedToast]);
   useEffect(() => {
     if (
       selectedType !== 'all' &&
@@ -643,14 +656,12 @@ export function App() {
     setSelectedQuickFilters({});
   };
   const hasActiveFilters =
-    selectedType !== 'all' ||
     activeQuickFilterValueIds.length > 0 ||
     dueFilter !== 'any' ||
     priorityFilter !== 'any' ||
     statusFilter !== 'active' ||
     sortMode !== 'due';
   const resetFilters = () => {
-    setSelectedType('all');
     setSelectedQuickFilters({});
     setDueFilter('any');
     setPriorityFilter('any');
@@ -827,7 +838,10 @@ export function App() {
                 <button
                   className={layout === 'board' ? 'active' : ''}
                   aria-pressed={layout === 'board'}
-                  onClick={() => setLayout('board')}
+                  onClick={() => {
+                    setLayout('board');
+                    setDueFilter('any');
+                  }}
                 >
                   <Icon name="board" />
                   Board
@@ -881,11 +895,12 @@ export function App() {
             </div>
             {filtersExpanded && (
               <FilterBar
-                types={data.types}
+                types={selectedType === 'all' ? data.types : []}
                 selectedType={selectedType}
                 onTypeChange={selectTypeView}
                 due={dueFilter}
                 onDueChange={setDueFilter}
+                showDueFilter={layout === 'list'}
                 priorityFilter={priorityFilter}
                 onPriorityChange={setPriorityFilter}
                 status={statusFilter}
@@ -1026,13 +1041,30 @@ export function App() {
           }
           todo={editing}
           parentId={quickParentId}
+          defaultTypeId={selectedType === 'all' ? undefined : selectedType}
           data={data}
           busy={busy}
           onClose={() => setEditing(undefined)}
           onSave={(draft, keepOpen) =>
             mutate(async () => {
               if (editing) await todoApi.updateTodo(editing.id, draft);
-              else await todoApi.createTodo(draft);
+              else {
+                await todoApi.createTodo(draft);
+                if (selectedType !== 'all') {
+                  const currentTypeName =
+                    data.types.find((type) => type.id === selectedType)?.name ??
+                    'this view';
+                  const createdTypeName =
+                    data.types.find((type) => type.id === draft.typeId)?.name ??
+                    'Untyped';
+                  setTaskCreatedToast({
+                    id: Date.now(),
+                    currentTypeName,
+                    createdTypeName,
+                    hiddenFromCurrentView: draft.typeId !== selectedType,
+                  });
+                }
+              }
               if (!keepOpen) setEditing(undefined);
             })
           }
@@ -1100,6 +1132,45 @@ export function App() {
           busy={busy}
         />
       )}
+      {taskCreatedToast && (
+        <TaskCreatedToast
+          key={taskCreatedToast.id}
+          toast={taskCreatedToast}
+          onDismiss={() => setTaskCreatedToast(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function TaskCreatedToast({
+  toast,
+  onDismiss,
+}: {
+  toast: TaskCreatedToastState;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="task-created-toast" role="status" aria-live="polite">
+      <span className="task-created-toast-icon">
+        <Icon name="check" />
+      </span>
+      <div>
+        <strong>Task created successfully</strong>
+        <p>
+          {toast.hiddenFromCurrentView ? (
+            <>
+              <strong>Not visible in {toast.currentTypeName}.</strong> This task
+              is assigned to {toast.createdTypeName}.
+            </>
+          ) : (
+            <>It has been added to {toast.currentTypeName}.</>
+          )}
+        </p>
+      </div>
+      <button type="button" onClick={onDismiss} aria-label="Dismiss">
+        <Icon name="x" />
+      </button>
     </div>
   );
 }
@@ -1355,6 +1426,7 @@ function FilterBar({
   onTypeChange,
   due,
   onDueChange,
+  showDueFilter,
   priorityFilter,
   onPriorityChange,
   status,
@@ -1369,6 +1441,7 @@ function FilterBar({
   onTypeChange: (value: string) => void;
   due: DueFilter;
   onDueChange: (value: DueFilter) => void;
+  showDueFilter: boolean;
   priorityFilter: PriorityFilter;
   onPriorityChange: (value: PriorityFilter) => void;
   status: StatusFilter;
@@ -1397,21 +1470,23 @@ function FilterBar({
           </select>
         </label>
       )}
-      <label className="filter-select">
-        <span>Due</span>
-        <select
-          aria-label="Filter by due date"
-          value={due}
-          onChange={(event) => onDueChange(event.target.value as DueFilter)}
-        >
-          <option value="any">Any date</option>
-          <option value="overdue">Overdue</option>
-          <option value="today">Today</option>
-          <option value="week">Next 7 days</option>
-          <option value="month">Next 30 days</option>
-          <option value="future">Future</option>
-        </select>
-      </label>
+      {showDueFilter && (
+        <label className="filter-select">
+          <span>Due</span>
+          <select
+            aria-label="Filter by due date"
+            value={due}
+            onChange={(event) => onDueChange(event.target.value as DueFilter)}
+          >
+            <option value="any">Any date</option>
+            <option value="overdue">Overdue</option>
+            <option value="today">Today</option>
+            <option value="week">Next 7 days</option>
+            <option value="month">Next 30 days</option>
+            <option value="future">Future</option>
+          </select>
+        </label>
+      )}
       <label className="filter-select">
         <span>Priority</span>
         <select
@@ -1993,6 +2068,7 @@ function TaskCard({
 function TaskModal({
   todo,
   parentId,
+  defaultTypeId,
   data,
   busy,
   onClose,
@@ -2002,6 +2078,7 @@ function TaskModal({
 }: {
   todo: Todo | null;
   parentId: string | null;
+  defaultTypeId?: string;
   data: AppData;
   busy: boolean;
   onClose: () => void;
@@ -2020,7 +2097,11 @@ function TaskModal({
         labelValueIds: todo.labels.map((label) => label.labelValueId),
         links: todo.links.map((link) => ({ label: link.label, url: link.url })),
       }
-    : { ...EMPTY_DRAFT, typeId: data.types[0]?.id ?? null, parentId };
+    : {
+        ...EMPTY_DRAFT,
+        typeId: defaultTypeId ?? data.types[0]?.id ?? null,
+        parentId,
+      };
   const [draft, setDraft] = useState<TodoDraft>(initial);
   const [attempted, setAttempted] = useState(false);
   const [parentPickerOpen, setParentPickerOpen] = useState(false);

@@ -1798,6 +1798,77 @@ svg {
   font-weight: 600;
   text-decoration: underline;
 }
+.task-created-toast {
+  position: fixed;
+  z-index: 40;
+  right: 22px;
+  bottom: 22px;
+  display: grid;
+  width: min(390px, calc(100vw - 44px));
+  grid-template-columns: 32px minmax(0, 1fr) 28px;
+  align-items: start;
+  gap: 10px;
+  padding: 13px 11px 13px 13px;
+  border: 1px solid #b9d0c1;
+  border-radius: 11px;
+  color: #3d5146;
+  background: #f4faf5;
+  box-shadow: 0 14px 38px rgba(35, 57, 45, 0.2);
+  animation: toast-arrive 0.24s ease-out;
+}
+.task-created-toast-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: #4f8066;
+}
+.task-created-toast-icon svg {
+  width: 16px;
+}
+.task-created-toast > div > strong {
+  display: block;
+  margin-top: 1px;
+  color: #315b45;
+  font-size: 11px;
+}
+.task-created-toast p {
+  margin: 4px 0 0;
+  color: #66736b;
+  font-size: 10px;
+  line-height: 1.45;
+}
+.task-created-toast p strong {
+  color: #405e4e;
+}
+.task-created-toast > button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 7px;
+  color: #758179;
+  background: transparent;
+}
+.task-created-toast > button:hover {
+  color: #3d5748;
+  background: #e3eee6;
+}
+.task-created-toast > button svg {
+  width: 14px;
+}
+@keyframes toast-arrive {
+  from {
+    transform: translateY(10px) scale(0.98);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
 .skeleton-board {
   padding-top: 10px;
 }
