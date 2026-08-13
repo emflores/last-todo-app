@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 const DEFAULT_TYPE_EMOJI: Record<string, string> = {
   'type-team': '🤝',
@@ -126,6 +126,44 @@ const migrations: Record<number, (db: Database.Database) => void> = {
       UPDATE labels SET value_kind='enum';
     `);
   },
+  7: (db) => {
+    db.exec(`
+      CREATE TABLE labels_v7 (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        scope TEXT NOT NULL CHECK (scope IN ('universal','type')),
+        cardinality TEXT NOT NULL CHECK (cardinality IN ('single','multi')),
+        quick_filter INTEGER NOT NULL DEFAULT 0 CHECK (quick_filter IN (0, 1)),
+        sort_order INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO labels_v7
+        (id,name,scope,cardinality,quick_filter,sort_order)
+      SELECT id,name,scope,cardinality,quick_filter,sort_order FROM labels;
+      DROP TABLE labels;
+      ALTER TABLE labels_v7 RENAME TO labels;
+
+      CREATE TABLE todos_v7 (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        type_id TEXT REFERENCES types(id) ON DELETE SET NULL,
+        due_date TEXT,
+        description TEXT,
+        parent_id TEXT REFERENCES todos(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT,
+        sensitive INTEGER NOT NULL DEFAULT 0 CHECK (sensitive IN (0, 1))
+      );
+      INSERT INTO todos_v7
+        (id,title,type_id,due_date,description,parent_id,created_at,updated_at,completed_at,sensitive)
+      SELECT id,title,type_id,due_date,description,parent_id,created_at,updated_at,completed_at,sensitive
+      FROM todos;
+      DROP TABLE todos;
+      ALTER TABLE todos_v7 RENAME TO todos;
+      CREATE INDEX idx_todos_active ON todos(due_date) WHERE completed_at IS NULL;
+      CREATE INDEX idx_todos_parent ON todos(parent_id);
+    `);
+  },
 };
 
 export function migrate(db: Database.Database): void {
@@ -142,9 +180,27 @@ export function migrate(db: Database.Database): void {
   ) {
     const migration = migrations[version];
     if (!migration) throw new Error(`Missing database migration ${version}`);
-    db.transaction(() => {
-      migration(db);
-      db.pragma(`user_version = ${version}`);
-    })();
+    const run = () =>
+      db.transaction(() => {
+        migration(db);
+        db.pragma(`user_version = ${version}`);
+      })();
+    if (version !== 7) {
+      run();
+      continue;
+    }
+
+    // SQLite cannot relax NOT NULL or remove legacy columns in place. Disable
+    // foreign-key actions outside the transaction while the referenced labels
+    // and todos tables are rebuilt, then validate every retained relationship.
+    db.pragma('foreign_keys = OFF');
+    try {
+      run();
+    } finally {
+      db.pragma('foreign_keys = ON');
+    }
+    const violations = db.pragma('foreign_key_check') as unknown[];
+    if (violations.length)
+      throw new Error('Database migration left invalid relationships');
   }
 }

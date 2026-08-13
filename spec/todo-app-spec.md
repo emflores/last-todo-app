@@ -63,8 +63,6 @@ CREATE TABLE labels (
   id            TEXT PRIMARY KEY,
   name          TEXT NOT NULL,
   scope         TEXT NOT NULL CHECK (scope IN ('universal','type')),
-  gated_type_id TEXT REFERENCES types(id),          -- legacy primary type
-  value_kind    TEXT NOT NULL DEFAULT 'enum',        -- legacy compatibility
   cardinality   TEXT NOT NULL CHECK (cardinality IN ('single','multi')),
   quick_filter  INTEGER NOT NULL DEFAULT 0,
   sort_order    INTEGER NOT NULL DEFAULT 0
@@ -87,7 +85,7 @@ CREATE TABLE label_values (
 CREATE TABLE todos (
   id           TEXT PRIMARY KEY,
   title        TEXT NOT NULL,
-  type_id      TEXT NOT NULL REFERENCES types(id),
+  type_id      TEXT REFERENCES types(id) ON DELETE SET NULL,
   due_date     TEXT,               -- ISO date; nullable only for children that inherit parent's
   description  TEXT,
   parent_id    TEXT REFERENCES todos(id) ON DELETE CASCADE,
@@ -117,14 +115,17 @@ CREATE TABLE todo_links (
 ```
 
 Notes:
-- **Required fields:** `title`, `type_id`, `due_date` (except children inheriting a parent's date). Enforced in app logic.
+- **Required fields:** `title` and `due_date` (except children inheriting a parent's date). `type_id` is optional. Enforced in app logic.
 - **Cardinality** (single vs multi) enforced in app logic on write to `todo_labels`.
 - **Config lives in the DB** (`types`, `labels`, `label_values`), so it travels in every snapshot.
 
 ## 6. Behavior rules
 
 ### 6.1 Types & labels
-- Every to-do has exactly one required **type**.
+- A to-do may have one **type** or remain untyped. Untyped tasks appear only in
+  **All tasks**.
+- Deleting a type makes every active and completed task using it untyped and
+  removes that type from label visibility mappings.
 - Selecting a type reveals that type's **type-gated** labels; **universal** labels (e.g. Priority = Low/Med/High, single) always show.
 - The seeded People label is type-gated, user-managed, multi-value, and enabled as a quick filter; Priority is universal, enum, single. These are ordinary label settings and can be deleted or recreated without special application behavior.
 
@@ -157,7 +158,7 @@ Rolling windows (not calendar week/month). Completed items are hidden by default
 - A top search bar that **compounds with active filters**: it searches within the current filtered set.
 
 ## 8. Create / edit UX
-- Fields: Title (required), Due date (required), Type (required); type-gated + universal labels; Description (free text); Links (add-more `{label?, url}`); optional parent.
+- Fields: Title (required), Due date (required), Type (optional); type-gated + universal labels; Description (free text); Links (add-more `{label?, url}`); optional parent.
 - A settings area manages Types, Labels, label values, and which labels provide quick filters.
 
 ## 9. Suggested stack

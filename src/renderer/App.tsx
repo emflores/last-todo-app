@@ -23,7 +23,7 @@ import type {
 const EMPTY_DATA: AppData = { todos: [], types: [], labels: [] };
 const EMPTY_DRAFT: TodoDraft = {
   title: '',
-  typeId: '',
+  typeId: null,
   dueDate: localISO(new Date()),
   description: '',
   parentId: null,
@@ -476,6 +476,15 @@ export function App() {
     window.localStorage.setItem('lasttodo:layout', layout);
   }, [layout]);
   useEffect(() => {
+    if (
+      selectedType !== 'all' &&
+      !data.types.some((type) => type.id === selectedType)
+    ) {
+      setSelectedType('all');
+      setSelectedQuickFilters({});
+    }
+  }, [data.types, selectedType]);
+  useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       if (onboardingStep) {
         if (event.key === 'Escape') {
@@ -716,27 +725,29 @@ export function App() {
           <span>All tasks</span>
           <span className="count">{activeCount}</span>
         </button>
-        <div
-          className={`rail-types ${onboardingStep === 4 ? 'onboarding-target' : ''}`}
-        >
-          <div className="rail-section-heading">
-            <span>Types</span>
+        {data.types.length > 0 && (
+          <div
+            className={`rail-types ${onboardingStep === 4 ? 'onboarding-target' : ''}`}
+          >
+            <div className="rail-section-heading">
+              <span>Types</span>
+            </div>
+            <nav aria-label="Task types">
+              {data.types.map((type) => (
+                <button
+                  key={type.id}
+                  className={`rail-row ${view !== 'settings' && selectedType === type.id ? 'active' : ''}`}
+                  onClick={() => selectTypeView(type.id)}
+                >
+                  <span className="type-emoji" aria-hidden="true">
+                    {type.emoji}
+                  </span>
+                  <span>{type.name}</span>
+                </button>
+              ))}
+            </nav>
           </div>
-          <nav aria-label="Task types">
-            {data.types.map((type) => (
-              <button
-                key={type.id}
-                className={`rail-row ${view !== 'settings' && selectedType === type.id ? 'active' : ''}`}
-                onClick={() => selectTypeView(type.id)}
-              >
-                <span className="type-emoji" aria-hidden="true">
-                  {type.emoji}
-                </span>
-                <span>{type.name}</span>
-              </button>
-            ))}
-          </nav>
-        </div>
+        )}
         <div className="rail-spacer" />
         <button
           className={`rail-row ${view === 'settings' ? 'active' : ''}`}
@@ -948,6 +959,7 @@ export function App() {
                           }
                           onAddChild={() => openCreate(todo.id)}
                           onEditChild={(child) => setEditing(child)}
+                          showUntypedChildren={selectedType === 'all'}
                           draggable={
                             !todo.completedAt && isReschedulableLane(lane.id)
                           }
@@ -983,6 +995,7 @@ export function App() {
                   )
                 }
                 onAddChild={(todo) => openCreate(todo.id)}
+                showUntypedChildren={selectedType === 'all'}
               />
             )}
           </>
@@ -1165,7 +1178,8 @@ function FirstRunTour({
         <>
           <p>
             Types are configurable categories in the left column. Edit their
-            name and icon, or create your own in Settings.
+            name and icon, create your own in Settings, or leave a task untyped
+            when it does not need a category.
           </p>
           <p>
             <strong>Labels add context:</strong> enable quick filters for any
@@ -1366,21 +1380,23 @@ function FilterBar({
 }) {
   return (
     <section className="filter-bar" id="task-filters" aria-label="Task filters">
-      <label className="filter-select">
-        <span>Type</span>
-        <select
-          aria-label="Filter by type"
-          value={selectedType}
-          onChange={(event) => onTypeChange(event.target.value)}
-        >
-          <option value="all">All types</option>
-          {types.map((type) => (
-            <option key={type.id} value={type.id}>
-              {type.emoji} {type.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      {types.length > 0 && (
+        <label className="filter-select">
+          <span>Type</span>
+          <select
+            aria-label="Filter by type"
+            value={selectedType}
+            onChange={(event) => onTypeChange(event.target.value)}
+          >
+            <option value="all">All types</option>
+            {types.map((type) => (
+              <option key={type.id} value={type.id}>
+                {type.emoji} {type.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <label className="filter-select">
         <span>Due</span>
         <select
@@ -1506,6 +1522,7 @@ function TaskList({
   onEdit,
   onToggle,
   onAddChild,
+  showUntypedChildren,
 }: {
   todos: Todo[];
   types: TodoType[];
@@ -1513,6 +1530,7 @@ function TaskList({
   onEdit: (todo: Todo) => void;
   onToggle: (todo: Todo) => Promise<void>;
   onAddChild: (todo: Todo) => void;
+  showUntypedChildren: boolean;
 }) {
   return (
     <section className="task-list" aria-label="Tasks as a list">
@@ -1534,6 +1552,7 @@ function TaskList({
             onEdit={onEdit}
             onToggle={onToggle}
             onAddChild={onAddChild}
+            showUntypedChildren={showUntypedChildren}
           />
         ))}
         {!todos.length && (
@@ -1555,6 +1574,7 @@ function ListTaskGroup({
   onEdit,
   onToggle,
   onAddChild,
+  showUntypedChildren,
 }: {
   todo: Todo;
   types: TodoType[];
@@ -1562,6 +1582,7 @@ function ListTaskGroup({
   onEdit: (todo: Todo) => void;
   onToggle: (todo: Todo) => Promise<void>;
   onAddChild: (todo: Todo) => void;
+  showUntypedChildren: boolean;
 }) {
   const [completing, setCompleting] = useState(false);
   const completeChildren = todo.children.filter(
@@ -1572,6 +1593,9 @@ function ListTaskGroup({
   const type = types.find((candidate) => candidate.id === todo.typeId);
   const dueDate = effectiveDate(todo, allTodos);
   const dueLane = laneFor(todo, allTodos);
+  const displayedChildren = showUntypedChildren
+    ? todo.children
+    : todo.children.filter((child) => child.typeId !== null);
 
   const toggleParent = async () => {
     if (todo.completedAt) {
@@ -1640,7 +1664,7 @@ function ListTaskGroup({
           </div>
         </div>
         <span className="list-type">
-          {type ? `${type.emoji} ${type.name}` : 'Task'}
+          {type ? `${type.emoji} ${type.name}` : 'Untyped'}
         </span>
         <div className="list-labels">
           {todo.labels.slice(0, 2).map((label) => (
@@ -1689,7 +1713,7 @@ function ListTaskGroup({
           </button>
         </div>
       </div>
-      {todo.children.map((child) => {
+      {displayedChildren.map((child) => {
         const childType = types.find(
           (candidate) => candidate.id === child.typeId,
         );
@@ -1731,7 +1755,7 @@ function ListTaskGroup({
               </div>
             </div>
             <span className="list-type">
-              {childType ? `${childType.emoji} ${childType.name}` : 'Task'}
+              {childType ? `${childType.emoji} ${childType.name}` : 'Untyped'}
             </span>
             <div className="list-labels">
               {child.labels.slice(0, 2).map((label) => (
@@ -1773,6 +1797,7 @@ function TaskCard({
   draggable,
   onDragStart,
   onDragEnd,
+  showUntypedChildren,
 }: {
   todo: Todo;
   types: TodoType[];
@@ -1785,6 +1810,7 @@ function TaskCard({
   draggable: boolean;
   onDragStart: (event: React.DragEvent<HTMLElement>) => void;
   onDragEnd: () => void;
+  showUntypedChildren: boolean;
 }) {
   const [completing, setCompleting] = useState(false);
   const completeChildren = todo.children.filter(
@@ -1796,6 +1822,9 @@ function TaskCard({
   const cardLabels = todo.labels;
   const dueLane = laneFor(todo, allTodos);
   const priorityLevel = priorityName(todo);
+  const displayedChildren = showUntypedChildren
+    ? todo.children
+    : todo.children.filter((child) => child.typeId !== null);
   const toggle = async () => {
     if (todo.completedAt) {
       await onToggle();
@@ -1851,7 +1880,7 @@ function TaskCard({
         <div className="card-title">
           <span className="type-name">
             {type?.emoji && <b className="task-type-emoji">{type.emoji}</b>}
-            {type?.name ?? 'Task'}
+            {type?.name ?? 'Untyped'}
             {todo.sensitive && (
               <span className="sensitive-badge" title="Sensitive task">
                 <Icon name="lock" />
@@ -1910,9 +1939,9 @@ function TaskCard({
           </span>
         )}
       </div>
-      {todo.children.length > 0 && (
+      {displayedChildren.length > 0 && (
         <div className="children-preview">
-          {todo.children.map((child) => (
+          {displayedChildren.map((child) => (
             <div className="child-row" key={child.id}>
               <button
                 type="button"
@@ -1991,17 +2020,43 @@ function TaskModal({
         labelValueIds: todo.labels.map((label) => label.labelValueId),
         links: todo.links.map((link) => ({ label: link.label, url: link.url })),
       }
-    : { ...EMPTY_DRAFT, typeId: data.types[0]?.id ?? '', parentId };
+    : { ...EMPTY_DRAFT, typeId: data.types[0]?.id ?? null, parentId };
   const [draft, setDraft] = useState<TodoDraft>(initial);
   const [attempted, setAttempted] = useState(false);
+  const [parentPickerOpen, setParentPickerOpen] = useState(false);
+  const [parentQuery, setParentQuery] = useState('');
   const isChild = Boolean(draft.parentId);
   const availableLabels = data.labels.filter(
     (label) =>
-      label.scope === 'universal' || label.gatedTypeIds.includes(draft.typeId),
+      label.values.length > 0 &&
+      (label.scope === 'universal' ||
+        (draft.typeId !== null && label.gatedTypeIds.includes(draft.typeId))),
   );
-  const valid = Boolean(
-    draft.title.trim() && draft.typeId && (draft.dueDate || isChild),
+  const valid = Boolean(draft.title.trim() && (draft.dueDate || isChild));
+  const selectedParent = data.todos.find(
+    (candidate) => candidate.id === draft.parentId,
   );
+  const parentCandidates = data.todos
+    .filter(
+      (candidate) =>
+        !candidate.parentId &&
+        candidate.id !== todo?.id &&
+        !candidate.completedAt,
+    )
+    .filter((candidate) => {
+      const query = parentQuery.trim().toLowerCase();
+      if (!query) return true;
+      const type = data.types.find((item) => item.id === candidate.typeId);
+      return [
+        candidate.title,
+        type?.name ?? 'Untyped',
+        ...candidate.labels.map((label) => label.value),
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(query);
+    })
+    .sort((a, b) => a.title.localeCompare(b.title));
 
   const save = (keepOpen: boolean) => {
     setAttempted(true);
@@ -2054,14 +2109,35 @@ function TaskModal({
         aria-labelledby="task-modal-title"
       >
         <header>
-          <div>
-            <p className="eyebrow">
-              {todo ? 'Task details' : isChild ? 'New child task' : 'New task'}
-            </p>
-            <h2 id="task-modal-title">
-              {todo ? 'Edit task' : 'Capture something'}
-            </h2>
-          </div>
+          {parentPickerOpen ? (
+            <div className="parent-picker-heading">
+              <button
+                type="button"
+                className="parent-picker-back"
+                onClick={() => setParentPickerOpen(false)}
+              >
+                <Icon name="chevron" />
+                Back
+              </button>
+              <div>
+                <p className="eyebrow">Parent task</p>
+                <h2 id="task-modal-title">Assign a parent</h2>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <p className="eyebrow">
+                {todo
+                  ? 'Task details'
+                  : isChild
+                    ? 'New child task'
+                    : 'New task'}
+              </p>
+              <h2 id="task-modal-title">
+                {todo ? 'Edit task' : 'Capture something'}
+              </h2>
+            </div>
+          )}
           <button
             className="icon-button large"
             onClick={onClose}
@@ -2070,287 +2146,416 @@ function TaskModal({
             <Icon name="x" />
           </button>
         </header>
-        <form onSubmit={submit}>
-          <div className="form-scroll">
-            <label className="field title-field">
-              <span>
-                Title <b>*</b>
-              </span>
+        {parentPickerOpen ? (
+          <div className="parent-picker-view">
+            <label className="parent-picker-search">
+              <Icon name="search" />
               <input
                 autoFocus
-                value={draft.title}
-                onChange={(event) => {
-                  const title = event.currentTarget.value;
-                  setDraft((current) => ({ ...current, title }));
-                }}
-                placeholder="What needs to happen?"
-                className={attempted && !draft.title.trim() ? 'invalid' : ''}
+                value={parentQuery}
+                onChange={(event) => setParentQuery(event.currentTarget.value)}
+                placeholder="Search by task, type, or label…"
+                aria-label="Search possible parent tasks"
               />
             </label>
-            <div className="form-grid">
-              <label className="field">
-                <span>
-                  Type <b>*</b>
-                </span>
-                <select
-                  value={draft.typeId}
-                  onChange={(event) => {
-                    const typeId = event.currentTarget.value;
-                    setDraft((current) => ({
-                      ...current,
-                      typeId,
-                      labelValueIds: [],
-                    }));
-                  }}
-                  className={attempted && !draft.typeId ? 'invalid' : ''}
-                >
-                  <option value="">Choose type…</option>
-                  {data.types.map((type) => (
-                    <option key={type.id} value={type.id}>
-                      {type.emoji} {type.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Due date {!isChild && <b>*</b>}</span>
-                <input
-                  type="date"
-                  value={draft.dueDate ?? ''}
-                  onChange={(event) => {
-                    const dueDate = event.currentTarget.value || null;
-                    setDraft((current) => ({ ...current, dueDate }));
-                  }}
-                  className={
-                    attempted && !draft.dueDate && !isChild ? 'invalid' : ''
-                  }
-                />
-                <small>
-                  {isChild && !draft.dueDate
-                    ? 'Inherits its parent’s date'
-                    : 'Your local time'}
-                </small>
-              </label>
-            </div>
-            <label className="field">
-              <span>Parent task</span>
-              <select
-                value={draft.parentId ?? ''}
-                disabled={Boolean(todo?.children.length)}
-                onChange={(event) => {
-                  const parentId = event.currentTarget.value || null;
-                  setDraft((current) => ({ ...current, parentId }));
+            {draft.parentId && (
+              <button
+                type="button"
+                className="parent-picker-clear"
+                onClick={() => {
+                  setDraft((current) => ({ ...current, parentId: null }));
+                  setParentPickerOpen(false);
                 }}
               >
-                <option value="">None — this is a top-level task</option>
-                {data.todos
-                  .filter(
-                    (candidate) =>
-                      !candidate.parentId &&
-                      candidate.id !== todo?.id &&
-                      !candidate.completedAt,
-                  )
-                  .map((candidate) => (
-                    <option key={candidate.id} value={candidate.id}>
-                      {candidate.title}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label className="sensitive-field">
-              <input
-                type="checkbox"
-                checked={draft.sensitive}
-                onChange={(event) => {
-                  const sensitive = event.currentTarget.checked;
-                  setDraft((current) => ({ ...current, sensitive }));
-                }}
-              />
-              <span className="sensitive-checkbox">
-                {draft.sensitive && <Icon name="check" />}
-              </span>
-              <span className="sensitive-field-icon">
-                <Icon name="lock" />
-              </span>
-              <span>
-                <strong>Sensitive</strong>
-                <small>
-                  Hide this task unless “Show sensitive” is enabled.
-                </small>
-              </span>
-            </label>
-            {availableLabels.length > 0 && (
-              <div className="label-fields">
-                <div className="section-label">Labels</div>
-                {availableLabels.map((label) => (
-                  <div className="label-control" key={label.id}>
-                    <div>
-                      <strong>{label.name}</strong>
-                      <small>
-                        {label.cardinality === 'multi'
-                          ? 'Choose any'
-                          : 'Choose one'}
-                      </small>
-                    </div>
-                    {label.cardinality === 'single' ? (
-                      <select
-                        value={
-                          label.values.find((value) =>
-                            draft.labelValueIds.includes(value.id),
-                          )?.id ?? ''
-                        }
-                        onChange={(event) =>
-                          setLabel(label, event.target.value, true)
-                        }
-                      >
-                        <option value="">None</option>
-                        {label.values.map((value) => (
-                          <option key={value.id} value={value.id}>
-                            {value.value}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <div className="check-chips">
-                        {label.values.map((value) => (
-                          <label key={value.id}>
-                            <input
-                              type="checkbox"
-                              checked={draft.labelValueIds.includes(value.id)}
-                              onChange={(event) =>
-                                setLabel(label, value.id, event.target.checked)
-                              }
-                            />
-                            <span>{value.value}</span>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+                <Icon name="x" />
+                Remove parent assignment
+              </button>
             )}
-            <label className="field">
-              <span>Description</span>
-              <textarea
-                value={draft.description}
-                onChange={(event) => {
-                  const description = event.currentTarget.value;
-                  setDraft((current) => ({ ...current, description }));
-                }}
-                placeholder="Add context, notes, or the desired outcome…"
-                rows={4}
-              />
-            </label>
-            <div className="links-editor">
-              <div className="section-label">
-                <span>Links</span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setDraft((current) => ({
-                      ...current,
-                      links: [...current.links, { label: '', url: '' }],
-                    }))
-                  }
-                >
-                  <Icon name="plus" />
-                  Add link
-                </button>
-              </div>
-              {draft.links.map((link, index) => (
-                <div className="link-row" key={index}>
-                  <input
-                    aria-label={`Link ${index + 1} label`}
-                    value={link.label}
-                    placeholder="Label (optional)"
-                    onChange={(event) => {
-                      const label = event.currentTarget.value;
-                      setDraft((current) => ({
-                        ...current,
-                        links: current.links.map((item, linkIndex) =>
-                          linkIndex === index ? { ...item, label } : item,
-                        ),
-                      }));
-                    }}
-                  />
-                  <input
-                    aria-label={`Link ${index + 1} URL`}
-                    type="url"
-                    required
-                    value={link.url}
-                    placeholder="https://…"
-                    onChange={(event) => {
-                      const url = event.currentTarget.value;
-                      setDraft((current) => ({
-                        ...current,
-                        links: current.links.map((item, linkIndex) =>
-                          linkIndex === index ? { ...item, url } : item,
-                        ),
-                      }));
-                    }}
-                  />
+            <div
+              className="parent-picker-list"
+              role="listbox"
+              aria-label="Possible parent tasks"
+            >
+              {parentCandidates.map((candidate) => {
+                const type = data.types.find(
+                  (item) => item.id === candidate.typeId,
+                );
+                const selected = candidate.id === draft.parentId;
+                return (
                   <button
                     type="button"
-                    className="icon-button"
-                    aria-label="Remove link"
+                    role="option"
+                    aria-selected={selected}
+                    className={`parent-picker-row ${selected ? 'selected' : ''}`}
+                    key={candidate.id}
+                    onClick={() => {
+                      setDraft((current) => ({
+                        ...current,
+                        parentId: candidate.id,
+                      }));
+                      setParentPickerOpen(false);
+                    }}
+                  >
+                    <span className="parent-picker-row-copy">
+                      <strong>{candidate.title}</strong>
+                      <small>
+                        {type ? `${type.emoji} ${type.name}` : 'Untyped'}
+                      </small>
+                    </span>
+                    <span className="parent-picker-row-labels">
+                      {candidate.labels.slice(0, 3).map((label) => (
+                        <span className="chip" key={label.labelValueId}>
+                          {label.value}
+                        </span>
+                      ))}
+                      {candidate.labels.length > 3 && (
+                        <span className="chip">
+                          +{candidate.labels.length - 3}
+                        </span>
+                      )}
+                    </span>
+                    <span className="parent-picker-select-indicator">
+                      {selected ? <Icon name="check" /> : 'Select'}
+                    </span>
+                  </button>
+                );
+              })}
+              {parentCandidates.length === 0 && (
+                <div className="parent-picker-empty">
+                  <Icon name="search" />
+                  <strong>No tasks found</strong>
+                  <small>
+                    {parentQuery.trim()
+                      ? 'Try a different search.'
+                      : 'Create another top-level task first.'}
+                  </small>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={submit}>
+            <div className="form-scroll">
+              <label className="field title-field">
+                <span>
+                  Title <b>*</b>
+                </span>
+                <input
+                  autoFocus
+                  value={draft.title}
+                  onChange={(event) => {
+                    const title = event.currentTarget.value;
+                    setDraft((current) => ({ ...current, title }));
+                  }}
+                  placeholder="What needs to happen?"
+                  className={attempted && !draft.title.trim() ? 'invalid' : ''}
+                />
+              </label>
+              <div className="form-grid">
+                <label className="field">
+                  <span>Type</span>
+                  <select
+                    value={draft.typeId ?? ''}
+                    onChange={(event) => {
+                      const typeId = event.currentTarget.value || null;
+                      setDraft((current) => ({
+                        ...current,
+                        typeId,
+                        labelValueIds: [],
+                      }));
+                    }}
+                  >
+                    <option value="">No type</option>
+                    {data.types.map((type) => (
+                      <option key={type.id} value={type.id}>
+                        {type.emoji} {type.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Due date {!isChild && <b>*</b>}</span>
+                  <input
+                    type="date"
+                    value={draft.dueDate ?? ''}
+                    onChange={(event) => {
+                      const dueDate = event.currentTarget.value || null;
+                      setDraft((current) => ({ ...current, dueDate }));
+                    }}
+                    className={
+                      attempted && !draft.dueDate && !isChild ? 'invalid' : ''
+                    }
+                  />
+                  <small>
+                    {isChild && !draft.dueDate
+                      ? 'Inherits its parent’s date'
+                      : 'Your local time'}
+                  </small>
+                </label>
+              </div>
+              <div className="field parent-task-field">
+                <span>Parent task</span>
+                <div className="parent-picker-control">
+                  <button
+                    type="button"
+                    className="parent-picker-trigger"
+                    disabled={Boolean(todo?.children.length)}
+                    onClick={() => {
+                      setParentQuery('');
+                      setParentPickerOpen(true);
+                    }}
+                  >
+                    <span>
+                      <strong>
+                        {selectedParent?.title ?? 'Assign parent'}
+                      </strong>
+                      <small>
+                        {selectedParent
+                          ? 'This task will inherit its parent’s date when no date is set.'
+                          : 'Make this a subtask of another task.'}
+                      </small>
+                    </span>
+                  </button>
+                  <div className="parent-picker-control-actions">
+                    {selectedParent && (
+                      <button
+                        type="button"
+                        className="parent-picker-remove-inline"
+                        disabled={Boolean(todo?.children.length)}
+                        onClick={() =>
+                          setDraft((current) => ({
+                            ...current,
+                            parentId: null,
+                          }))
+                        }
+                      >
+                        <Icon name="x" />
+                        Remove
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="parent-picker-trigger-action"
+                      disabled={Boolean(todo?.children.length)}
+                      onClick={() => {
+                        setParentQuery('');
+                        setParentPickerOpen(true);
+                      }}
+                    >
+                      {selectedParent ? 'Change' : 'Choose'}
+                      <Icon name="chevron" />
+                    </button>
+                  </div>
+                </div>
+                {Boolean(todo?.children.length) && (
+                  <small>
+                    A task with children cannot be assigned to another parent.
+                  </small>
+                )}
+              </div>
+              <label className="sensitive-field">
+                <input
+                  type="checkbox"
+                  checked={draft.sensitive}
+                  onChange={(event) => {
+                    const sensitive = event.currentTarget.checked;
+                    setDraft((current) => ({ ...current, sensitive }));
+                  }}
+                />
+                <span className="sensitive-checkbox">
+                  {draft.sensitive && <Icon name="check" />}
+                </span>
+                <span className="sensitive-field-icon">
+                  <Icon name="lock" />
+                </span>
+                <span>
+                  <strong>Sensitive</strong>
+                  <small>
+                    Hide this task unless “Show sensitive” is enabled.
+                  </small>
+                </span>
+              </label>
+              {availableLabels.length > 0 && (
+                <div className="label-fields">
+                  <div className="section-label">Labels</div>
+                  {availableLabels.map((label) => (
+                    <div className="label-control" key={label.id}>
+                      <div>
+                        <strong>{label.name}</strong>
+                        <small>
+                          {label.cardinality === 'multi'
+                            ? 'Choose any'
+                            : 'Choose one'}
+                        </small>
+                      </div>
+                      {label.cardinality === 'single' ? (
+                        <select
+                          value={
+                            label.values.find((value) =>
+                              draft.labelValueIds.includes(value.id),
+                            )?.id ?? ''
+                          }
+                          onChange={(event) =>
+                            setLabel(label, event.target.value, true)
+                          }
+                        >
+                          <option value="">None</option>
+                          {label.values.map((value) => (
+                            <option key={value.id} value={value.id}>
+                              {value.value}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="check-chips">
+                          {label.values.map((value) => (
+                            <label key={value.id}>
+                              <input
+                                type="checkbox"
+                                checked={draft.labelValueIds.includes(value.id)}
+                                onChange={(event) =>
+                                  setLabel(
+                                    label,
+                                    value.id,
+                                    event.target.checked,
+                                  )
+                                }
+                              />
+                              <span>{value.value}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <label className="field">
+                <span>Description</span>
+                <textarea
+                  value={draft.description}
+                  onChange={(event) => {
+                    const description = event.currentTarget.value;
+                    setDraft((current) => ({ ...current, description }));
+                  }}
+                  placeholder="Add context, notes, or the desired outcome…"
+                  rows={4}
+                />
+              </label>
+              <div className="links-editor">
+                <div className="section-label">
+                  <span>Links</span>
+                  <button
+                    type="button"
                     onClick={() =>
                       setDraft((current) => ({
                         ...current,
-                        links: current.links.filter(
-                          (_, linkIndex) => linkIndex !== index,
-                        ),
+                        links: [...current.links, { label: '', url: '' }],
                       }))
                     }
                   >
-                    <Icon name="x" />
+                    <Icon name="plus" />
+                    Add link
                   </button>
                 </div>
-              ))}
+                {draft.links.map((link, index) => (
+                  <div className="link-row" key={index}>
+                    <input
+                      aria-label={`Link ${index + 1} label`}
+                      value={link.label}
+                      placeholder="Label (optional)"
+                      onChange={(event) => {
+                        const label = event.currentTarget.value;
+                        setDraft((current) => ({
+                          ...current,
+                          links: current.links.map((item, linkIndex) =>
+                            linkIndex === index ? { ...item, label } : item,
+                          ),
+                        }));
+                      }}
+                    />
+                    <input
+                      aria-label={`Link ${index + 1} URL`}
+                      type="url"
+                      required
+                      value={link.url}
+                      placeholder="https://…"
+                      onChange={(event) => {
+                        const url = event.currentTarget.value;
+                        setDraft((current) => ({
+                          ...current,
+                          links: current.links.map((item, linkIndex) =>
+                            linkIndex === index ? { ...item, url } : item,
+                          ),
+                        }));
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label="Remove link"
+                      onClick={() =>
+                        setDraft((current) => ({
+                          ...current,
+                          links: current.links.filter(
+                            (_, linkIndex) => linkIndex !== index,
+                          ),
+                        }))
+                      }
+                    >
+                      <Icon name="x" />
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-          <footer>
-            <div className="modal-actions-left">
-              {onDelete && (
-                <button
-                  type="button"
-                  className="danger-text"
-                  onClick={onDelete}
-                >
-                  Delete
-                </button>
-              )}
-              {onQuickChild && (
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={onQuickChild}
-                >
-                  <Icon name="plus" />
-                  Child
-                </button>
-              )}
-            </div>
-            <button type="button" className="secondary" onClick={onClose}>
-              Cancel
-            </button>
-            {!todo && (
-              <button
-                type="button"
-                className="secondary create-another"
-                disabled={busy || !valid}
-                onClick={(event) => {
-                  if (event.currentTarget.form?.reportValidity()) save(true);
-                }}
-              >
-                Create & add another
+            <footer>
+              <div className="modal-actions-left">
+                {onDelete && (
+                  <button
+                    type="button"
+                    className="danger-text"
+                    onClick={onDelete}
+                  >
+                    Delete
+                  </button>
+                )}
+                {onQuickChild && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={onQuickChild}
+                  >
+                    <Icon name="plus" />
+                    Child
+                  </button>
+                )}
+              </div>
+              <button type="button" className="secondary" onClick={onClose}>
+                Cancel
               </button>
-            )}
-            <button className="primary" value="save" disabled={busy || !valid}>
-              {busy ? 'Saving…' : todo ? 'Save changes' : 'Create task'}
-            </button>
-          </footer>
-        </form>
+              {!todo && (
+                <button
+                  type="button"
+                  className="secondary create-another"
+                  disabled={busy || !valid}
+                  onClick={(event) => {
+                    if (event.currentTarget.form?.reportValidity()) save(true);
+                  }}
+                >
+                  Create & add another
+                </button>
+              )}
+              <button
+                className="primary"
+                value="save"
+                disabled={busy || !valid}
+              >
+                {busy ? 'Saving…' : todo ? 'Save changes' : 'Create task'}
+              </button>
+            </footer>
+          </form>
+        )}
       </section>
     </div>
   );
@@ -2788,10 +2993,12 @@ function Settings({
                       className="icon-button danger"
                       aria-label={`Delete ${type.name}`}
                       onClick={async () => {
+                        const taskCount = data.todos.filter(
+                          (todo) => todo.typeId === type.id,
+                        ).length;
                         const confirmed = await requestConfirmation({
                           title: `Delete the “${type.name}” type?`,
-                          message:
-                            'The type can only be deleted when no tasks or labels use it.',
+                          message: `${taskCount} active or completed ${taskCount === 1 ? 'task' : 'tasks'} will become untyped and will only appear in All tasks. Labels scoped to this type will no longer be available for new tasks unless they also apply to another type.`,
                           confirmLabel: 'Delete type',
                           danger: true,
                         });
@@ -2900,12 +3107,14 @@ function Settings({
                           <small>
                             {label.scope === 'universal'
                               ? 'All task types'
-                              : `For ${data.types
-                                  .filter((type) =>
-                                    label.gatedTypeIds.includes(type.id),
-                                  )
-                                  .map((type) => type.name)
-                                  .join(', ')}`}{' '}
+                              : label.gatedTypeIds.length > 0
+                                ? `For ${data.types
+                                    .filter((type) =>
+                                      label.gatedTypeIds.includes(type.id),
+                                    )
+                                    .map((type) => type.name)
+                                    .join(', ')}`
+                                : 'No task types'}{' '}
                             · {label.cardinality}
                             {label.quickFilter ? ' · quick filter' : ''}
                           </small>
@@ -2940,6 +3149,18 @@ function Settings({
                           aria-hidden="true"
                         />
                       </label>
+                      {label.values.length === 0 && (
+                        <div className="label-empty-warning" role="status">
+                          <Icon name="alert" />
+                          <span>
+                            <strong>No values yet</strong>
+                            <small>
+                              This label won’t appear in task creation until it
+                              has at least one value.
+                            </small>
+                          </span>
+                        </div>
+                      )}
                       <div className="value-list">
                         {label.values.map((value) => (
                           <div key={value.id}>

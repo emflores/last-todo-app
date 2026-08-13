@@ -15,8 +15,8 @@ import { AppDatabase } from '../database/database';
 type TodoRow = {
   id: string;
   title: string;
-  type_id: string;
-  type_name: string;
+  type_id: string | null;
+  type_name: string | null;
   due_date: string | null;
   effective_due_date: string | null;
   description: string | null;
@@ -116,7 +116,8 @@ export class TodoService {
     await this.database.write((db) => {
       const title = requiredText(input.title, 'Title');
       validateDate(input.dueDate);
-      this.assertType(db, input.typeId);
+      const typeId = input.typeId ?? null;
+      this.assertType(db, typeId);
       const parentId = input.parentId ?? null;
       this.assertValidParent(db, id, parentId, false);
       if (!parentId && !input.dueDate)
@@ -129,7 +130,7 @@ export class TodoService {
       ).run(
         id,
         title,
-        input.typeId,
+        typeId,
         input.dueDate ?? null,
         input.description?.trim() || null,
         parentId,
@@ -137,7 +138,7 @@ export class TodoService {
         timestamp,
         input.sensitive ? 1 : 0,
       );
-      this.replaceLabels(db, id, input.typeId, input.labels ?? []);
+      this.replaceLabels(db, id, typeId, input.labels ?? []);
       this.replaceLinks(db, id, input.links ?? []);
       if (parentId) this.reopenParent(db, parentId, timestamp);
     });
@@ -154,7 +155,10 @@ export class TodoService {
         input.title === undefined
           ? (old.title as string)
           : requiredText(input.title, 'Title');
-      const typeId = input.typeId ?? (old.type_id as string);
+      const typeId =
+        input.typeId === undefined
+          ? (old.type_id as string | null)
+          : input.typeId;
       const dueDate =
         input.dueDate === undefined
           ? (old.due_date as string | null)
@@ -244,7 +248,7 @@ export class TodoService {
       COALESCE(t.due_date, p.due_date) AS effective_due_date,
       (SELECT COUNT(*) FROM todos c WHERE c.parent_id=t.id) AS child_total,
       (SELECT COUNT(*) FROM todos c WHERE c.parent_id=t.id AND c.completed_at IS NOT NULL) AS child_completed
-      FROM todos t JOIN types ty ON ty.id=t.type_id LEFT JOIN todos p ON p.id=t.parent_id`;
+      FROM todos t LEFT JOIN types ty ON ty.id=t.type_id LEFT JOIN todos p ON p.id=t.parent_id`;
   }
 
   private reopenParent(
@@ -331,7 +335,8 @@ export class TodoService {
     };
   }
 
-  private assertType(db: Database.Database, id: string): void {
+  private assertType(db: Database.Database, id: string | null): void {
+    if (id === null) return;
     if (!db.prepare('SELECT 1 FROM types WHERE id=?').get(id))
       throw new Error('Type not found');
   }
@@ -361,7 +366,7 @@ export class TodoService {
   private replaceLabels(
     db: Database.Database,
     todoId: string,
-    typeId: string,
+    typeId: string | null,
     labels: TodoLabelInput[],
   ): void {
     const seen = new Set<string>();
@@ -381,9 +386,14 @@ export class TodoService {
       if (!label) throw new Error('Label not found');
       if (
         label.scope === 'type' &&
-        !db
-          .prepare('SELECT 1 FROM label_types WHERE label_id=? AND type_id=?')
-          .get(selection.labelId, typeId)
+        (!typeId ||
+          !db
+            .prepare('SELECT 1 FROM label_types WHERE label_id=? AND type_id=?')
+            .get(selection.labelId, typeId)) &&
+        (typeId !== null ||
+          !db
+            .prepare('SELECT 1 FROM todo_labels WHERE todo_id=? AND label_id=?')
+            .get(todoId, selection.labelId))
       ) {
         throw new Error('This label is not available for the selected type');
       }
@@ -411,8 +421,9 @@ export class TodoService {
   private assertExistingLabelsAllowed(
     db: Database.Database,
     todoId: string,
-    typeId: string,
+    typeId: string | null,
   ): void {
+    if (typeId === null) return;
     const invalid = db
       .prepare(
         `SELECT 1 FROM todo_labels tl JOIN labels l ON l.id=tl.label_id

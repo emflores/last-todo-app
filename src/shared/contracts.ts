@@ -47,8 +47,8 @@ export interface TodoLink {
 export interface Todo {
   id: string;
   title: string;
-  typeId: string;
-  typeName: string;
+  typeId: string | null;
+  typeName: string | null;
   dueDate: string | null;
   effectiveDueDate: string;
   description: string | null;
@@ -77,7 +77,7 @@ export interface TodoLinkInput {
 
 export interface CreateTodoInput {
   title: string;
-  typeId: string;
+  typeId?: string | null;
   dueDate?: string | null;
   description?: string | null;
   parentId?: string | null;
@@ -88,7 +88,7 @@ export interface CreateTodoInput {
 
 export interface UpdateTodoInput {
   title?: string;
-  typeId?: string;
+  typeId?: string | null;
   dueDate?: string | null;
   description?: string | null;
   parentId?: string | null;

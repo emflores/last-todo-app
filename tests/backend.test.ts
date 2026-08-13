@@ -86,6 +86,18 @@ describe('backend services', () => {
       VALUES
         ('label-people', 'People', 'type', 'type-people', 'user_managed', 'multi', 0),
         ('label-project', 'Project', 'universal', NULL, 'enum', 'single', 1);
+      CREATE TABLE todos (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        type_id TEXT NOT NULL REFERENCES types(id),
+        due_date TEXT,
+        description TEXT,
+        parent_id TEXT REFERENCES todos(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT,
+        sensitive INTEGER NOT NULL DEFAULT 0
+      );
       PRAGMA user_version = 4;
     `);
     legacy.close();
@@ -103,8 +115,11 @@ describe('backend services', () => {
       upgraded.db.prepare('SELECT label_id, type_id FROM label_types').all(),
     ).toEqual([{ label_id: 'label-people', type_id: 'type-people' }]);
     expect(
-      upgraded.db.prepare('SELECT DISTINCT value_kind FROM labels').all(),
-    ).toEqual([{ value_kind: 'enum' }]);
+      upgraded.db
+        .prepare('PRAGMA table_info(labels)')
+        .all()
+        .map((column) => (column as { name: string }).name),
+    ).not.toContain('value_kind');
     upgraded.close();
   });
 
@@ -128,8 +143,22 @@ describe('backend services', () => {
         cardinality TEXT NOT NULL,
         sort_order INTEGER NOT NULL DEFAULT 0
       );
-      CREATE TABLE todos (id TEXT PRIMARY KEY, title TEXT NOT NULL);
-      INSERT INTO todos (id, title) VALUES ('legacy-todo', 'Existing task');
+      CREATE TABLE todos (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        type_id TEXT NOT NULL REFERENCES types(id),
+        due_date TEXT,
+        description TEXT,
+        parent_id TEXT REFERENCES todos(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+      INSERT INTO todos
+        (id, title, type_id, due_date, created_at, updated_at)
+      VALUES
+        ('legacy-todo', 'Existing task', 'type-team', '2026-08-20',
+         '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z');
       PRAGMA user_version = 2;
     `);
     legacy.close();
@@ -139,6 +168,12 @@ describe('backend services', () => {
       .prepare('SELECT sensitive FROM todos WHERE id = ?')
       .get('legacy-todo') as { sensitive: number };
     expect(row.sensitive).toBe(0);
+    expect(
+      upgraded.db
+        .prepare('PRAGMA table_info(todos)')
+        .all()
+        .find((column) => (column as { name: string }).name === 'type_id'),
+    ).toMatchObject({ notnull: 0 });
     expect(
       upgraded.db
         .prepare('SELECT emoji FROM types WHERE id = ?')
@@ -165,6 +200,111 @@ describe('backend services', () => {
         .get('legacy-todo'),
     ).toEqual({ title: 'Existing task' });
     recovery.close();
+  });
+
+  it('preserves related task data while making types optional', () => {
+    const legacyPath = path.join(directory, 'legacy-v6.db');
+    const legacy = new BetterSqlite3(legacyPath);
+    legacy.pragma('foreign_keys = ON');
+    legacy.exec(`
+      CREATE TABLE types (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        emoji TEXT NOT NULL DEFAULT '🏷️'
+      );
+      CREATE TABLE labels (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        gated_type_id TEXT REFERENCES types(id),
+        value_kind TEXT NOT NULL,
+        cardinality TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        quick_filter INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE label_values (
+        id TEXT PRIMARY KEY,
+        label_id TEXT NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+        value TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE todos (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        type_id TEXT NOT NULL REFERENCES types(id),
+        due_date TEXT,
+        description TEXT,
+        parent_id TEXT REFERENCES todos(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT,
+        sensitive INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE todo_labels (
+        todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+        label_id TEXT NOT NULL REFERENCES labels(id),
+        label_value_id TEXT NOT NULL REFERENCES label_values(id),
+        PRIMARY KEY (todo_id, label_id, label_value_id)
+      );
+      CREATE TABLE todo_links (
+        id TEXT PRIMARY KEY,
+        todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+        label TEXT,
+        url TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE label_types (
+        label_id TEXT NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+        type_id TEXT NOT NULL REFERENCES types(id),
+        PRIMARY KEY (label_id, type_id)
+      );
+      CREATE INDEX idx_label_types_type ON label_types(type_id);
+      CREATE INDEX idx_todos_active ON todos(due_date) WHERE completed_at IS NULL;
+      CREATE INDEX idx_todos_parent ON todos(parent_id);
+
+      INSERT INTO types (id,name,emoji) VALUES ('type-work','Work','💼');
+      INSERT INTO labels
+        (id,name,scope,gated_type_id,value_kind,cardinality,quick_filter)
+      VALUES ('label-project','Project','type','type-work','enum','single',1);
+      INSERT INTO label_types VALUES ('label-project','type-work');
+      INSERT INTO label_values VALUES ('project-alpha','label-project','Alpha',0);
+      INSERT INTO todos
+        (id,title,type_id,due_date,created_at,updated_at,sensitive)
+      VALUES
+        ('parent','Parent','type-work','2026-08-20','2026-08-01','2026-08-01',0);
+      INSERT INTO todos
+        (id,title,type_id,parent_id,created_at,updated_at,sensitive)
+      VALUES
+        ('child','Child','type-work','parent','2026-08-01','2026-08-01',0);
+      INSERT INTO todo_labels VALUES ('parent','label-project','project-alpha');
+      INSERT INTO todo_links VALUES
+        ('link-1','parent','Brief','https://example.test/brief',0);
+      PRAGMA user_version = 6;
+    `);
+    legacy.close();
+
+    const upgraded = new AppDatabase(legacyPath);
+    expect(upgraded.db.pragma('foreign_key_check')).toEqual([]);
+    expect(
+      upgraded.db.prepare('SELECT id,parent_id FROM todos ORDER BY id').all(),
+    ).toEqual([
+      { id: 'child', parent_id: 'parent' },
+      { id: 'parent', parent_id: null },
+    ]);
+    expect(upgraded.db.prepare('SELECT * FROM todo_labels').all()).toHaveLength(
+      1,
+    );
+    expect(upgraded.db.prepare('SELECT * FROM todo_links').all()).toHaveLength(
+      1,
+    );
+    expect(
+      upgraded.db
+        .prepare('PRAGMA table_info(todos)')
+        .all()
+        .find((column) => (column as { name: string }).name === 'type_id'),
+    ).toMatchObject({ notnull: 0 });
+    upgraded.close();
   });
 
   it('persists todos, inherited dates, labels, links and compound queries', async () => {
@@ -208,6 +348,31 @@ describe('backend services', () => {
     const updated = await todos.update(todo.id, { sensitive: false });
     expect(updated.sensitive).toBe(false);
     expect(todos.get(todo.id).sensitive).toBe(false);
+  });
+
+  it('creates and edits tasks without a type', async () => {
+    const todo = await todos.create({
+      title: 'Unsorted thought',
+      dueDate: '2026-08-20',
+      labels: [{ labelId: 'label-priority', valueIds: ['priority-low'] }],
+    });
+    expect(todo).toMatchObject({ typeId: null, typeName: null });
+    await expect(
+      todos.create({
+        title: 'Invalid untyped label',
+        dueDate: '2026-08-20',
+        labels: [{ labelId: 'label-people', valueIds: [] }],
+      }),
+    ).rejects.toThrow('not available');
+
+    expect(await todos.update(todo.id, { typeId: 'type-team' })).toMatchObject({
+      typeId: 'type-team',
+      typeName: 'Team',
+    });
+    expect(await todos.update(todo.id, { typeId: null })).toMatchObject({
+      typeId: null,
+      typeName: null,
+    });
   });
 
   it('enforces hierarchy, completion, label scope and cardinality', async () => {
@@ -292,7 +457,7 @@ describe('backend services', () => {
     ).toHaveLength(0);
   });
 
-  it('supports taxonomy CRUD and prevents deletion while in use', async () => {
+  it('supports taxonomy CRUD and detaches tasks when deleting a type', async () => {
     const type = await taxonomy.createType({
       name: 'Strategy',
       emoji: '🧭',
@@ -302,9 +467,9 @@ describe('backend services', () => {
     expect((await taxonomy.updateType(type.id, { emoji: '♟️' })).emoji).toBe(
       '♟️',
     );
-    await expect(
-      taxonomy.createType({ name: ' strategy ' }),
-    ).rejects.toThrow('unique');
+    await expect(taxonomy.createType({ name: ' strategy ' })).rejects.toThrow(
+      'unique',
+    );
     await expect(
       taxonomy.updateType(type.id, { name: 'STRATEGY' }),
     ).resolves.toMatchObject({ name: 'STRATEGY' });
@@ -390,7 +555,67 @@ describe('backend services', () => {
       }),
     ).rejects.toThrow('not available');
     await expect(taxonomy.deleteValue(value.id)).rejects.toThrow('in use');
-    await expect(taxonomy.deleteType(type.id)).rejects.toThrow('in use');
+    const completed = await todos.create({
+      title: 'Completed strategy',
+      typeId: type.id,
+      dueDate: '2026-08-15',
+      labels: [{ labelId: label.id, valueIds: [value.id] }],
+    });
+    await todos.setCompleted(completed.id, true);
+
+    await taxonomy.deleteType(type.id);
+    expect(taxonomy.list().types.some((item) => item.id === type.id)).toBe(
+      false,
+    );
+    expect(
+      taxonomy.list().labels.find((item) => item.id === label.id),
+    ).toMatchObject({ gatedTypeIds: ['type-product'] });
+    expect(todos.get(completed.id)).toMatchObject({
+      typeId: null,
+      completedAt: expect.any(String),
+      labels: [
+        expect.objectContaining({
+          labelId: label.id,
+          values: [expect.objectContaining({ value: 'Growth' })],
+        }),
+      ],
+    });
+    await expect(
+      todos.update(completed.id, {
+        description: 'Historical context retained',
+        labels: [{ labelId: label.id, valueIds: [value.id] }],
+      }),
+    ).resolves.toMatchObject({
+      typeId: null,
+      description: 'Historical context retained',
+    });
+    expect(
+      todos
+        .list({ includeCompleted: true })
+        .find((todo) => todo.title === 'Explore market'),
+    ).toMatchObject({ typeId: null });
+    expect(todos.list({ includeCompleted: true, typeIds: [type.id] })).toEqual(
+      [],
+    );
+  });
+
+  it('allows every task type to be deleted', async () => {
+    const task = await todos.create({
+      title: 'Eventually untyped',
+      typeId: 'type-team',
+      dueDate: '2026-08-20',
+    });
+    for (const type of taxonomy.list().types)
+      await taxonomy.deleteType(type.id);
+
+    expect(taxonomy.list().types).toEqual([]);
+    expect(todos.get(task.id).typeId).toBeNull();
+    await expect(
+      taxonomy.updateLabel('label-people', { quickFilter: false }),
+    ).resolves.toMatchObject({ gatedTypeIds: [], quickFilter: false });
+    await expect(
+      todos.create({ title: 'No taxonomy needed', dueDate: '2026-08-21' }),
+    ).resolves.toMatchObject({ typeId: null });
   });
 
   it('can remove and recreate the seeded People taxonomy as ordinary data', async () => {

@@ -54,7 +54,6 @@ export class TaxonomyService {
       id: string;
       name: string;
       scope: 'universal' | 'type';
-      gated_type_id: string | null;
       cardinality: 'single' | 'multi';
       quick_filter: number;
       sort_order: number;
@@ -106,11 +105,9 @@ export class TaxonomyService {
     await this.database.write((db) => {
       const typeName = name(input.name);
       this.assertUniqueTypeName(db, typeName);
-      db
-        .prepare(
-          'INSERT INTO types (id,name,emoji,sort_order) VALUES (?,?,?,?)',
-        )
-        .run(id, typeName, emoji(input.emoji), input.sortOrder ?? 0);
+      db.prepare(
+        'INSERT INTO types (id,name,emoji,sort_order) VALUES (?,?,?,?)',
+      ).run(id, typeName, emoji(input.emoji), input.sortOrder ?? 0);
     });
     return this.type(id);
   }
@@ -135,15 +132,13 @@ export class TaxonomyService {
 
   async deleteType(id: string): Promise<void> {
     await this.database.write((db) => {
-      try {
-        const result = db.prepare('DELETE FROM types WHERE id=?').run(id);
-        if (!result.changes) throw new Error('Type not found');
-      } catch (error) {
-        if (error instanceof Error && error.message.includes('FOREIGN KEY')) {
-          throw new Error('Type is in use and cannot be deleted');
-        }
-        throw error;
-      }
+      if (!db.prepare('SELECT 1 FROM types WHERE id=?').get(id))
+        throw new Error('Type not found');
+      db.prepare(
+        'UPDATE todos SET type_id=NULL, updated_at=? WHERE type_id=?',
+      ).run(new Date().toISOString(), id);
+      db.prepare('DELETE FROM label_types WHERE type_id=?').run(id);
+      db.prepare('DELETE FROM types WHERE id=?').run(id);
     });
   }
 
@@ -157,13 +152,12 @@ export class TaxonomyService {
       this.validateLabel(db, input.scope, gatedTypeIds, input.cardinality);
       db.prepare(
         `INSERT INTO labels
-        (id,name,scope,gated_type_id,value_kind,cardinality,quick_filter,sort_order)
-        VALUES (?,?,?,?,'enum',?,?,?)`,
+        (id,name,scope,cardinality,quick_filter,sort_order)
+        VALUES (?,?,?,?,?,?)`,
       ).run(
         id,
         labelName,
         input.scope,
-        gatedTypeIds[0] ?? null,
         input.cardinality,
         input.quickFilter ? 1 : 0,
         input.sortOrder ?? 0,
@@ -182,7 +176,6 @@ export class TaxonomyService {
         | {
             name: string;
             scope: 'universal' | 'type';
-            gated_type_id: string | null;
             cardinality: 'single' | 'multi';
             quick_filter: number;
             sort_order: number;
@@ -199,12 +192,13 @@ export class TaxonomyService {
             : uniqueTypeIds(input.gatedTypeIds)
           : [];
       const cardinality = input.cardinality ?? old.cardinality;
-      this.validateLabel(db, scope, gatedTypeIds, cardinality);
+      this.validateLabel(db, scope, gatedTypeIds, cardinality, true);
       if (scope === 'type') {
         const assignedTypes = db
           .prepare(
             `SELECT DISTINCT t.type_id FROM todo_labels tl
-            JOIN todos t ON t.id=tl.todo_id WHERE tl.label_id=?`,
+            JOIN todos t ON t.id=tl.todo_id
+            WHERE tl.label_id=? AND t.type_id IS NOT NULL`,
           )
           .all(id) as Array<{ type_id: string }>;
         if (assignedTypes.some((item) => !gatedTypeIds.includes(item.type_id)))
@@ -221,12 +215,11 @@ export class TaxonomyService {
           throw new Error('Some todos have multiple values for this label');
       }
       db.prepare(
-        `UPDATE labels SET name=?,scope=?,gated_type_id=?,cardinality=?,quick_filter=?,sort_order=?
+        `UPDATE labels SET name=?,scope=?,cardinality=?,quick_filter=?,sort_order=?
         WHERE id=?`,
       ).run(
         labelName,
         scope,
-        gatedTypeIds[0] ?? null,
         cardinality,
         input.quickFilter === undefined
           ? old.quick_filter
@@ -395,12 +388,13 @@ export class TaxonomyService {
     scope: string,
     gatedTypeIds: string[],
     cardinality: string,
+    allowEmptyTypeScope = false,
   ): void {
     if (!['universal', 'type'].includes(scope))
       throw new Error('Invalid label scope');
     if (!['single', 'multi'].includes(cardinality))
       throw new Error('Invalid label cardinality');
-    if (scope === 'type' && gatedTypeIds.length === 0)
+    if (scope === 'type' && gatedTypeIds.length === 0 && !allowEmptyTypeScope)
       throw new Error('A type-scoped label requires at least one task type');
     if (
       gatedTypeIds.some(

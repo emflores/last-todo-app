@@ -35,7 +35,8 @@ if you trust the build.
 - **See what matters next.** The swim-lane board turns due dates into a clear
   view of urgency, while list view provides familiar sorting and filtering.
 - **Adapt it to your life.** Create task types, choose an emoji for each, and
-  build reusable labels that apply to one or many types.
+  build reusable labels that apply to one or many types—or leave a task
+  untyped when it does not need a category.
 - **Keep important categories close.** Turn any label into a set of quick,
   clickable filters—useful for people, projects, contexts, or anything else
   you track often.

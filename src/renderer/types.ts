@@ -42,7 +42,7 @@ export interface TodoLink {
 export interface Todo {
   id: string;
   title: string;
-  typeId: string;
+  typeId: string | null;
   dueDate: string | null;
   description: string;
   parentId: string | null;
@@ -57,7 +57,7 @@ export interface Todo {
 
 export interface TodoDraft {
   title: string;
-  typeId: string;
+  typeId: string | null;
   dueDate: string | null;
   description: string;
   parentId: string | null;
