@@ -1247,39 +1247,10 @@ svg {
     0 2px 5px rgba(45, 49, 44, 0.055),
     inset 0 1px rgba(255, 255, 255, 0.8);
   cursor: pointer;
-  --type-accent: #759b86;
   transition:
     transform 0.16s,
     border-color 0.16s,
     box-shadow 0.16s;
-}
-.task-card::before {
-  position: absolute;
-  top: 12px;
-  bottom: 12px;
-  left: -1px;
-  width: 3px;
-  border-radius: 0 4px 4px 0;
-  background: var(--type-accent);
-  content: '';
-  opacity: 0.86;
-  transform: scaleY(0.72);
-  transform-origin: center;
-  transition:
-    opacity 0.18s,
-    transform 0.22s;
-}
-.task-card.type-accent-1 {
-  --type-accent: #b48671;
-}
-.task-card.type-accent-2 {
-  --type-accent: #808bae;
-}
-.task-card.type-accent-3 {
-  --type-accent: #c2a75d;
-}
-.task-card.type-accent-4 {
-  --type-accent: #a67896;
 }
 .task-card.priority-card-high {
   border-color: #e3c9c1;
@@ -1290,10 +1261,6 @@ svg {
   box-shadow:
     0 9px 22px rgba(41, 45, 41, 0.09),
     inset 0 1px rgba(255, 255, 255, 0.9);
-}
-.task-card:hover::before {
-  opacity: 1;
-  transform: scaleY(1);
 }
 .task-card.completed {
   opacity: 0.66;
@@ -1344,6 +1311,7 @@ svg {
   animation: task-celebrate 0.7s cubic-bezier(0.2, 0.9, 0.25, 1) both;
 }
 .task-card.completing::before {
+  position: absolute;
   top: -1px;
   right: 14px;
   bottom: auto;
@@ -1351,6 +1319,7 @@ svg {
   width: auto;
   height: 2px;
   border-radius: 0 0 4px 4px;
+  content: '';
   opacity: 1;
   transform: scaleX(1);
   background: linear-gradient(90deg, #4e8869, #d5b24d, #cf765d, #858dba);

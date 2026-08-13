@@ -1,6 +1,7 @@
 import { app, shell } from 'electron';
 
 import type { UpdateStatus } from '../../shared/contracts';
+import { AppLogger, describeError } from './appLogger';
 import { updateStatusFromRelease } from './updateServiceCore';
 
 const LATEST_RELEASE_URL =
@@ -9,6 +10,8 @@ const LATEST_RELEASE_URL =
 export class UpdateService {
   private status: UpdateStatus | null = null;
   private pendingCheck: Promise<UpdateStatus> | null = null;
+
+  constructor(private readonly logger: AppLogger) {}
 
   check(): Promise<UpdateStatus> {
     if (this.pendingCheck) return this.pendingCheck;
@@ -49,6 +52,7 @@ export class UpdateService {
       );
     } catch (error) {
       console.error('Could not check for a LastTodo update:', error);
+      this.logger.warn('update-check-failed', describeError(error));
       this.status = {
         currentVersion,
         latestVersion: null,

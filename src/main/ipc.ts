@@ -5,6 +5,7 @@ import {
   type CreateLabelValueInput,
   type CreateTodoInput,
   type CreateTypeInput,
+  type RendererErrorReport,
   type TodoQuery,
   type UpdateLabelInput,
   type UpdateLabelValueInput,
@@ -12,6 +13,7 @@ import {
   type UpdateTypeInput,
 } from '../shared/contracts';
 import { BackupService } from './services/backupService';
+import { AppLogger } from './services/appLogger';
 import { TaxonomyService } from './services/taxonomyService';
 import { TodoService } from './services/todoService';
 import { UpdateService } from './services/updateService';
@@ -21,6 +23,7 @@ export function registerIpcHandlers(
   taxonomy: TaxonomyService,
   backups: BackupService,
   updates: UpdateService,
+  logger: AppLogger,
 ): void {
   for (const channel of Object.values(IPC_CHANNELS))
     ipcMain.removeHandler(channel);
@@ -94,4 +97,33 @@ export function registerIpcHandlers(
   );
   ipcMain.handle(IPC_CHANNELS.checkForUpdates, () => updates.check());
   ipcMain.handle(IPC_CHANNELS.openUpdateDownload, () => updates.openDownload());
+
+  ipcMain.removeAllListeners(IPC_CHANNELS.reportRendererError);
+  ipcMain.on(IPC_CHANNELS.reportRendererError, (_event, value: unknown) => {
+    const report = rendererErrorReport(value);
+    if (report) logger.error('renderer-javascript-error', report);
+  });
+}
+
+function rendererErrorReport(value: unknown): RendererErrorReport | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.kind !== 'error' && candidate.kind !== 'unhandled-rejection')
+    return null;
+  if (typeof candidate.message !== 'string') return null;
+
+  return {
+    kind: candidate.kind,
+    message: candidate.message.slice(0, 2_000),
+    ...(typeof candidate.stack === 'string'
+      ? { stack: candidate.stack.slice(0, 12_000) }
+      : {}),
+    ...(typeof candidate.source === 'string'
+      ? { source: candidate.source.slice(0, 1_000) }
+      : {}),
+    ...(typeof candidate.line === 'number' ? { line: candidate.line } : {}),
+    ...(typeof candidate.column === 'number'
+      ? { column: candidate.column }
+      : {}),
+  };
 }

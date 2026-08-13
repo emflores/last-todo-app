@@ -153,6 +153,15 @@ export interface UpdateStatus {
   error: string | null;
 }
 
+export interface RendererErrorReport {
+  kind: 'error' | 'unhandled-rejection';
+  message: string;
+  stack?: string;
+  source?: string;
+  line?: number;
+  column?: number;
+}
+
 export interface BootstrapData {
   todos: Todo[];
   taxonomy: Taxonomy;
@@ -183,6 +192,7 @@ export const IPC_CHANNELS = {
   restoreLatestBackup: 'backups:restore-latest',
   checkForUpdates: 'updates:check',
   openUpdateDownload: 'updates:open-download',
+  reportRendererError: 'diagnostics:renderer-error',
 } as const;
 
 export interface TodoAPI {

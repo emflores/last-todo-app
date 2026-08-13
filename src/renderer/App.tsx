@@ -1382,10 +1382,6 @@ function TaskCard({
   const canComplete =
     !todo.children.length || completeChildren === todo.children.length;
   const type = types.find((candidate) => candidate.id === todo.typeId);
-  const typeIndex = Math.max(
-    0,
-    types.findIndex((candidate) => candidate.id === todo.typeId),
-  );
   const people = todo.labels.filter(
     (label) => label.labelName.toLowerCase() === 'people',
   );
@@ -1409,7 +1405,7 @@ function TaskCard({
   };
   return (
     <article
-      className={`task-card type-accent-${typeIndex % 5} priority-card-${priorityLevel} ${todo.completedAt ? 'completed' : ''} ${completing ? 'completing' : ''}`}
+      className={`task-card priority-card-${priorityLevel} ${todo.completedAt ? 'completed' : ''} ${completing ? 'completing' : ''}`}
       tabIndex={0}
       onClick={onEdit}
       onKeyDown={(event) => {

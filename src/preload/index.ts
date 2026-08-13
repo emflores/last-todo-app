@@ -53,3 +53,52 @@ const todoAPI = {
 } satisfies TodoAPI;
 
 contextBridge.exposeInMainWorld('todoAPI', todoAPI);
+
+function text(value: unknown, maxLength: number): string {
+  const result = value instanceof Error ? value.message : String(value);
+  return result.slice(0, maxLength);
+}
+
+interface RendererWindow {
+  addEventListener(
+    type: 'error',
+    listener: (event: {
+      error: unknown;
+      message: string;
+      filename: string;
+      lineno: number;
+      colno: number;
+    }) => void,
+  ): void;
+  addEventListener(
+    type: 'unhandledrejection',
+    listener: (event: { reason: unknown }) => void,
+  ): void;
+}
+
+const rendererWindow = globalThis as unknown as RendererWindow;
+
+rendererWindow.addEventListener('error', (event) => {
+  ipcRenderer.send(IPC_CHANNELS.reportRendererError, {
+    kind: 'error',
+    message: text(event.error ?? event.message, 2_000),
+    stack:
+      event.error instanceof Error
+        ? event.error.stack?.slice(0, 12_000)
+        : undefined,
+    source: event.filename?.slice(0, 1_000),
+    line: event.lineno,
+    column: event.colno,
+  });
+});
+
+rendererWindow.addEventListener('unhandledrejection', (event) => {
+  ipcRenderer.send(IPC_CHANNELS.reportRendererError, {
+    kind: 'unhandled-rejection',
+    message: text(event.reason, 2_000),
+    stack:
+      event.reason instanceof Error
+        ? event.reason.stack?.slice(0, 12_000)
+        : undefined,
+  });
+});

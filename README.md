@@ -129,6 +129,21 @@ for Electron automatically.
 `npm run typecheck` checks the Electron main/preload code and browser renderer
 with their respective TypeScript environments.
 
+## Diagnostic logs
+
+LastTodo writes structured lifecycle and error events to `main.log` in
+Electron's application logs directory. Chromium and native-process diagnostics
+are written beside it in `chromium.log`. `main.log` rotates at roughly 2 MB;
+an oversized Chromium log is rotated on the next launch. Each keeps one
+`.previous.log` file.
+
+The exact directory is printed when the app starts. Typical locations are
+`~/Library/Logs/LastTodo` on macOS and the `logs/` folder inside LastTodo's
+per-user application data directory on Linux and Windows. Renderer exits,
+unresponsive windows, failed page loads, uncaught renderer errors, Electron
+child-process exits, and uncaught main-process errors are recorded without task
+or database contents.
+
 ## Project layout
 
 ```text
