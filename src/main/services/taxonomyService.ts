@@ -236,15 +236,14 @@ export class TaxonomyService {
 
   async deleteLabel(id: string): Promise<void> {
     await this.database.write((db) => {
-      try {
-        const result = db.prepare('DELETE FROM labels WHERE id=?').run(id);
-        if (!result.changes) throw new Error('Label not found');
-      } catch (error) {
-        if (error instanceof Error && error.message.includes('FOREIGN KEY')) {
-          throw new Error('Label is in use and cannot be deleted');
-        }
-        throw error;
-      }
+      if (!db.prepare('SELECT 1 FROM labels WHERE id=?').get(id))
+        throw new Error('Label not found');
+
+      // Deleting a label is intentionally destructive for the label only:
+      // retain every task, but detach all of this label's selections first.
+      // The label's configured types and values then cascade with the label.
+      db.prepare('DELETE FROM todo_labels WHERE label_id=?').run(id);
+      db.prepare('DELETE FROM labels WHERE id=?').run(id);
     });
   }
 

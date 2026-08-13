@@ -3222,10 +3222,16 @@ function Settings({
                                 onClick={async (event) => {
                                   event.preventDefault();
                                   event.stopPropagation();
+                                  const taskCount = data.todos.filter((todo) =>
+                                    todo.labels.some(
+                                      (selection) =>
+                                        selection.labelId === label.id,
+                                    ),
+                                  ).length;
+                                  const valueCount = label.values.length;
                                   const confirmed = await requestConfirmation({
                                     title: `Delete “${label.name}”?`,
-                                    message:
-                                      'This will delete the label and all of its values. Labels currently used by tasks cannot be deleted.',
+                                    message: `This will permanently remove the label from ${taskCount} ${taskCount === 1 ? 'task' : 'tasks'} and delete ${valueCount} configured ${valueCount === 1 ? 'value' : 'values'}. The tasks themselves will not be deleted. This cannot be undone.`,
                                     confirmLabel: 'Delete label',
                                     danger: true,
                                   });

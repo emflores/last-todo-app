@@ -654,7 +654,29 @@ describe('backend services', () => {
   });
 
   it('can remove and recreate the seeded People taxonomy as ordinary data', async () => {
+    const person = taxonomy
+      .list()
+      .labels.find((label) => label.id === 'label-people')!;
+    const personValue = await taxonomy.createValue({
+      labelId: person.id,
+      value: 'Jordan',
+    });
+    const retainedTask = await todos.create({
+      title: 'Meet Jordan',
+      typeId: 'type-people',
+      dueDate: '2026-08-22',
+      labels: [{ labelId: person.id, valueIds: [personValue.id] }],
+    });
+
     await taxonomy.deleteLabel('label-people');
+    expect(taxonomy.list().labels).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: person.id })]),
+    );
+    expect(todos.get(retainedTask.id)).toMatchObject({
+      id: retainedTask.id,
+      title: 'Meet Jordan',
+      labels: [],
+    });
     await taxonomy.deleteType('type-people');
 
     const type = await taxonomy.createType({ name: 'Contacts', emoji: '📇' });
