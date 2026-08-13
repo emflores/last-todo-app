@@ -2740,10 +2740,22 @@ svg {
 .type-edit-modal {
   width: min(520px, calc(100vw - 48px));
 }
+.label-edit-modal {
+  width: min(560px, calc(100vw - 48px));
+}
 .type-edit-fields {
   display: flex;
   flex-direction: column;
   gap: 22px;
+}
+.label-edit-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.label-edit-validation {
+  margin-top: 2px !important;
+  color: #a35f42 !important;
 }
 .emoji-selector-field {
   min-width: 0;
@@ -3255,6 +3267,10 @@ svg {
   font-size: 10px;
   line-height: 1.4;
 }
+.label-settings summary small.label-orphan-summary {
+  color: #966a2d;
+  font-weight: 650;
+}
 .label-settings summary > span {
   color: #747b75;
   font-size: 10px;
@@ -3355,6 +3371,37 @@ svg {
   color: #7a6127;
   background: #fff9e9;
 }
+.label-orphan-warning {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 10px;
+  padding: 9px 10px;
+  border: 1px solid #dfc69d;
+  border-radius: 8px;
+  color: #765426;
+  background: #fff7e7;
+}
+.label-orphan-warning > svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  stroke-width: 1.8;
+}
+.label-orphan-warning > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.label-orphan-warning strong {
+  font-size: 10px;
+}
+.label-orphan-warning small {
+  margin-top: 2px;
+  color: #80683f;
+  font-size: 10px;
+  line-height: 1.4;
+}
 .label-empty-warning > svg {
   width: 17px;
   height: 17px;
@@ -3444,7 +3491,25 @@ svg {
   border-color: #b8c5bc;
   background: #fbfdfb;
 }
-.new-label .label-choice-group input {
+.label-choice-group > label.choice-disabled,
+.label-choice-group > label.choice-disabled:hover {
+  border-color: #dedfda;
+  color: #9b9f9a;
+  background: #f1f1ed;
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+.label-choice-group > label.choice-disabled strong,
+.label-choice-group > label.choice-disabled small {
+  color: #8c918c;
+}
+.label-choice-group > label.choice-disabled .label-choice-radio {
+  border-color: #c9ccc7;
+  background: #e8e9e5;
+}
+.new-label .label-choice-group input,
+.label-edit-modal .label-choice-group input {
   position: absolute;
   top: 50%;
   left: 11px;

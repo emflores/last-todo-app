@@ -3,6 +3,7 @@ import type {
   CreateTodoInput,
   Todo as ContractTodo,
   TodoAPI as ContractAPI,
+  UpdateLabelInput,
   UpdateStatus,
 } from '../shared/contracts';
 import type {
@@ -34,10 +35,7 @@ export interface TodoAPI {
     cardinality: Cardinality;
     quickFilter: boolean;
   }): Promise<void>;
-  updateLabel(
-    id: string,
-    input: { name?: string; quickFilter?: boolean },
-  ): Promise<void>;
+  updateLabel(id: string, input: UpdateLabelInput): Promise<void>;
   deleteLabel(id: string): Promise<void>;
   createLabelValue(labelId: string, input: { value: string }): Promise<void>;
   updateLabelValue(id: string, input: { value: string }): Promise<void>;

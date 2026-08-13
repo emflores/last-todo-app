@@ -610,9 +610,44 @@ describe('backend services', () => {
 
     expect(taxonomy.list().types).toEqual([]);
     expect(todos.get(task.id).typeId).toBeNull();
+    expect(
+      taxonomy.list().labels.find((label) => label.id === 'label-people'),
+    ).toMatchObject({
+      scope: 'type',
+      gatedTypeIds: [],
+      quickFilter: true,
+    });
+    await expect(
+      taxonomy.updateLabel('label-people', {
+        scope: 'universal',
+        gatedTypeIds: [],
+      }),
+    ).resolves.toMatchObject({
+      scope: 'universal',
+      gatedTypeIds: [],
+      quickFilter: true,
+    });
     await expect(
       taxonomy.updateLabel('label-people', { quickFilter: false }),
-    ).resolves.toMatchObject({ gatedTypeIds: [], quickFilter: false });
+    ).resolves.toMatchObject({
+      scope: 'universal',
+      gatedTypeIds: [],
+      quickFilter: false,
+    });
+    const replacement = await taxonomy.createType({
+      name: 'Contacts',
+      emoji: '📇',
+    });
+    await expect(
+      taxonomy.updateLabel('label-people', {
+        name: 'Contacts',
+        scope: 'type',
+        gatedTypeIds: [replacement.id],
+      }),
+    ).resolves.toMatchObject({
+      name: 'Contacts',
+      gatedTypeIds: [replacement.id],
+    });
     await expect(
       todos.create({ title: 'No taxonomy needed', dueDate: '2026-08-21' }),
     ).resolves.toMatchObject({ typeId: null });

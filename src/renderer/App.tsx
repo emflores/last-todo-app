@@ -2887,6 +2887,12 @@ function Settings({
     name: string;
     emoji: string;
   } | null>(null);
+  const [labelEdit, setLabelEdit] = useState<{
+    id: string;
+    name: string;
+    scope: 'universal' | 'type';
+    gatedTypeIds: string[];
+  } | null>(null);
   const [newValue, setNewValue] = useState<Record<string, string>>({});
   const [renameTarget, setRenameTarget] = useState<{
     label: string;
@@ -2929,6 +2935,22 @@ function Settings({
         emoji: typeEdit.emoji,
       });
       setTypeEdit(null);
+    });
+  };
+  const submitLabelEdit = (event: FormEvent) => {
+    event.preventDefault();
+    if (
+      !labelEdit?.name.trim() ||
+      (labelEdit.scope === 'type' && labelEdit.gatedTypeIds.length === 0)
+    )
+      return;
+    void mutate(async () => {
+      await todoApi.updateLabel(labelEdit.id, {
+        name: labelEdit.name.trim(),
+        scope: labelEdit.scope,
+        gatedTypeIds: labelEdit.scope === 'type' ? labelEdit.gatedTypeIds : [],
+      });
+      setLabelEdit(null);
     });
   };
   const addLabel = (event: FormEvent) => {
@@ -2976,6 +2998,20 @@ function Settings({
       .then(({ complete }) => setFtueComplete(complete))
       .catch(() => setFtueComplete(null));
   }, []);
+  useEffect(() => {
+    if (data.types.length > 0) return;
+    setLabelForm((current) =>
+      current.scope === 'universal' && current.gatedTypeIds.length === 0
+        ? current
+        : { ...current, scope: 'universal', gatedTypeIds: [] },
+    );
+    setLabelEdit((current) =>
+      !current ||
+      (current.scope === 'universal' && current.gatedTypeIds.length === 0)
+        ? current
+        : { ...current, scope: 'universal', gatedTypeIds: [] },
+    );
+  }, [data.types.length]);
   const setFtueState = (complete: boolean) => {
     void mutate(async () => {
       await todoApi.setOnboardingComplete(complete);
@@ -3077,9 +3113,18 @@ function Settings({
                         const taskCount = data.todos.filter(
                           (todo) => todo.typeId === type.id,
                         ).length;
+                        const labelsLosingFinalType = data.labels.filter(
+                          (label) =>
+                            label.scope === 'type' &&
+                            label.gatedTypeIds.length === 1 &&
+                            label.gatedTypeIds[0] === type.id,
+                        );
+                        const labelWarning = labelsLosingFinalType.length
+                          ? ` ${labelsLosingFinalType.map((label) => label.name).join(', ')} ${labelsLosingFinalType.length === 1 ? 'will no longer be assigned to any task type' : 'will no longer be assigned to any task types'}. Their values and existing task assignments will be preserved, but they will be hidden from task creation and quick filters until edited.`
+                          : '';
                         const confirmed = await requestConfirmation({
                           title: `Delete the “${type.name}” type?`,
-                          message: `${taskCount} active or completed ${taskCount === 1 ? 'task' : 'tasks'} will become untyped and will only appear in All tasks. Labels scoped to this type will no longer be available for new tasks unless they also apply to another type.`,
+                          message: `${taskCount} active or completed ${taskCount === 1 ? 'task' : 'tasks'} will become untyped and will only appear in All tasks.${labelWarning}`,
                           confirmLabel: 'Delete type',
                           danger: true,
                         });
@@ -3137,8 +3182,8 @@ function Settings({
                 <div>
                   <h2>Labels & values</h2>
                   <p>
-                    Universal labels appear everywhere. Gated labels appear for
-                    one type.
+                    Labels can appear for every task or only for specific task
+                    types.
                   </p>
                 </div>
               </div>
@@ -3156,12 +3201,21 @@ function Settings({
                                 onClick={(event) => {
                                   event.preventDefault();
                                   event.stopPropagation();
-                                  startRename('label', label.name, (name) =>
-                                    todoApi.updateLabel(label.id, { name }),
-                                  );
+                                  setLabelEdit({
+                                    id: label.id,
+                                    name: label.name,
+                                    scope:
+                                      data.types.length === 0
+                                        ? 'universal'
+                                        : label.scope,
+                                    gatedTypeIds:
+                                      data.types.length === 0
+                                        ? []
+                                        : [...label.gatedTypeIds],
+                                  });
                                 }}
                               >
-                                Rename
+                                Edit
                               </button>
                               <button
                                 className="delete-label"
@@ -3185,7 +3239,14 @@ function Settings({
                               </button>
                             </div>
                           </div>
-                          <small>
+                          <small
+                            className={
+                              label.scope === 'type' &&
+                              label.gatedTypeIds.length === 0
+                                ? 'label-orphan-summary'
+                                : undefined
+                            }
+                          >
                             {label.scope === 'universal'
                               ? 'All task types'
                               : label.gatedTypeIds.length > 0
@@ -3242,6 +3303,20 @@ function Settings({
                           </span>
                         </div>
                       )}
+                      {label.scope === 'type' &&
+                        label.gatedTypeIds.length === 0 && (
+                          <div className="label-orphan-warning" role="status">
+                            <Icon name="alert" />
+                            <span>
+                              <strong>Not assigned to any task types</strong>
+                              <small>
+                                This label is hidden from task creation and
+                                quick filters. Choose Edit to update its name or
+                                visibility.
+                              </small>
+                            </span>
+                          </div>
+                        )}
                       <div className="value-list">
                         {label.values.map((value) => (
                           <div key={value.id}>
@@ -3340,12 +3415,27 @@ function Settings({
                           ],
                         ] as const
                       ).map(([value, title, description]) => (
-                        <label key={value}>
+                        <label
+                          key={value}
+                          className={
+                            value === 'type' && data.types.length === 0
+                              ? 'choice-disabled'
+                              : undefined
+                          }
+                          title={
+                            value === 'type' && data.types.length === 0
+                              ? 'Create a task type before limiting a label to specific task types.'
+                              : undefined
+                          }
+                        >
                           <input
                             type="radio"
                             name="label-visibility"
                             value={value}
                             checked={labelForm.scope === value}
+                            disabled={
+                              value === 'type' && data.types.length === 0
+                            }
                             onChange={() =>
                               setLabelForm({ ...labelForm, scope: value })
                             }
@@ -3723,6 +3813,152 @@ function Settings({
                 <button
                   className="primary"
                   disabled={!typeEdit.name.trim() || busy}
+                >
+                  {busy ? 'Saving…' : 'Save changes'}
+                </button>
+              </footer>
+            </form>
+          </section>
+        </div>
+      )}
+      {labelEdit && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !busy)
+              setLabelEdit(null);
+          }}
+        >
+          <section
+            className="modal label-edit-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="label-edit-title"
+          >
+            <header>
+              <div>
+                <p className="eyebrow">Edit label</p>
+                <h2 id="label-edit-title">Name and visibility</h2>
+              </div>
+              <button
+                className="icon-button large"
+                onClick={() => setLabelEdit(null)}
+                aria-label="Close"
+                disabled={busy}
+              >
+                <Icon name="x" />
+              </button>
+            </header>
+            <form onSubmit={submitLabelEdit}>
+              <div className="form-scroll label-edit-fields">
+                <label className="field title-field">
+                  <span>Name</span>
+                  <input
+                    autoFocus
+                    value={labelEdit.name}
+                    onChange={(event) =>
+                      setLabelEdit({
+                        ...labelEdit,
+                        name: event.currentTarget.value,
+                      })
+                    }
+                    onFocus={(event) => event.currentTarget.select()}
+                  />
+                </label>
+                <div className="field label-choice-field">
+                  <span className="field-heading">Visibility</span>
+                  <div
+                    className="label-choice-group"
+                    role="radiogroup"
+                    aria-label="Label visibility"
+                  >
+                    <label>
+                      <input
+                        type="radio"
+                        name="edit-label-visibility"
+                        value="universal"
+                        checked={labelEdit.scope === 'universal'}
+                        onChange={() =>
+                          setLabelEdit({
+                            ...labelEdit,
+                            scope: 'universal',
+                          })
+                        }
+                      />
+                      <span className="label-choice-radio" />
+                      <span>
+                        <strong>All task types</strong>
+                        <small>Available on every task.</small>
+                      </span>
+                    </label>
+                    <label
+                      className={
+                        data.types.length === 0 ? 'choice-disabled' : undefined
+                      }
+                      title={
+                        data.types.length === 0
+                          ? 'Create a task type before limiting a label to specific task types.'
+                          : undefined
+                      }
+                    >
+                      <input
+                        type="radio"
+                        name="edit-label-visibility"
+                        value="type"
+                        checked={labelEdit.scope === 'type'}
+                        disabled={data.types.length === 0}
+                        onChange={() =>
+                          setLabelEdit({ ...labelEdit, scope: 'type' })
+                        }
+                      />
+                      <span className="label-choice-radio" />
+                      <span>
+                        <strong>Specific task types</strong>
+                        <small>
+                          {data.types.length === 0
+                            ? 'Create a task type first.'
+                            : 'Choose one or more types.'}
+                        </small>
+                      </span>
+                    </label>
+                  </div>
+                  {labelEdit.scope === 'type' && (
+                    <div className="field type-scope-field">
+                      <span>Task types</span>
+                      <TaskTypeMultiSelect
+                        types={data.types}
+                        selected={labelEdit.gatedTypeIds}
+                        onChange={(gatedTypeIds) =>
+                          setLabelEdit({ ...labelEdit, gatedTypeIds })
+                        }
+                      />
+                      {labelEdit.gatedTypeIds.length === 0 && (
+                        <small className="label-edit-validation">
+                          Choose at least one task type to save.
+                        </small>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <footer>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setLabelEdit(null)}
+                  disabled={busy}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="primary"
+                  disabled={
+                    !labelEdit.name.trim() ||
+                    (labelEdit.scope === 'type' &&
+                      labelEdit.gatedTypeIds.length === 0) ||
+                    busy
+                  }
                 >
                   {busy ? 'Saving…' : 'Save changes'}
                 </button>
