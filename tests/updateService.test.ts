@@ -23,7 +23,7 @@ describe('manual application updates', () => {
           {
             name: 'LastTodo-0.2.0.dmg',
             browser_download_url:
-              'https://github.com/michael/last-todo-app/releases/download/v0.2.0/LastTodo-0.2.0.dmg',
+              'https://github.com/emflores/last-todo-app/releases/download/v0.2.0/LastTodo-0.2.0.dmg',
           },
         ],
       },
@@ -36,7 +36,7 @@ describe('manual application updates', () => {
       latestVersion: '0.2.0',
       updateAvailable: true,
       downloadUrl:
-        'https://github.com/michael/last-todo-app/releases/download/v0.2.0/LastTodo-0.2.0.dmg',
+        'https://github.com/emflores/last-todo-app/releases/download/v0.2.0/LastTodo-0.2.0.dmg',
       checkedAt,
       error: null,
     });

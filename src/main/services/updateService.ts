@@ -4,7 +4,7 @@ import type { UpdateStatus } from '../../shared/contracts';
 import { updateStatusFromRelease } from './updateServiceCore';
 
 const LATEST_RELEASE_URL =
-  'https://api.github.com/repos/michael/last-todo-app/releases/latest';
+  'https://api.github.com/repos/emflores/last-todo-app/releases/latest';
 
 export class UpdateService {
   private status: UpdateStatus | null = null;

@@ -1,12 +1,12 @@
 {
   "name": "last-todo",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "A local-first desktop todo board with configurable types and labels",
-  "homepage": "https://github.com/michael/last-todo-app",
+  "homepage": "https://github.com/emflores/last-todo-app",
   "repository": {
     "type": "git",
-    "url": "https://github.com/michael/last-todo-app.git"
+    "url": "https://github.com/emflores/last-todo-app.git"
   },
   "author": {
     "name": "LastTodo Contributors",

@@ -52,7 +52,7 @@ function parseRelease(value: unknown): GitHubRelease {
 function trustedDmgUrl(value: string): string | null {
   try {
     const url = new URL(value);
-    const expectedPath = '/michael/last-todo-app/releases/download/';
+    const expectedPath = '/emflores/last-todo-app/releases/download/';
     return url.protocol === 'https:' &&
       url.hostname === 'github.com' &&
       url.pathname.startsWith(expectedPath) &&
