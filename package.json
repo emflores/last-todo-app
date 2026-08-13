@@ -1,0 +1,110 @@
+{
+  "name": "last-todo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local-first desktop todo board with configurable types and labels",
+  "homepage": "https://github.com/michael/last-todo-app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/michael/last-todo-app.git"
+  },
+  "author": {
+    "name": "LastTodo Contributors",
+    "email": "lasttodo@users.noreply.github.com"
+  },
+  "type": "module",
+  "main": "out/main/index.js",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.12.0 <23",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "start": "electron-vite preview",
+    "typecheck": "npm run typecheck:electron && npm run typecheck:renderer",
+    "typecheck:electron": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:renderer": "tsc --noEmit -p tsconfig.web.json",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "rebuild": "electron-rebuild --force --only better-sqlite3",
+    "rebuild:node": "npm rebuild better-sqlite3",
+    "predev": "npm run rebuild",
+    "prestart": "npm run rebuild",
+    "prebuild:app": "npm run rebuild",
+    "build:app": "electron-vite build",
+    "build:dir": "npm run typecheck && electron-vite build && electron-builder --dir",
+    "build": "npm run typecheck && electron-vite build && electron-builder"
+  },
+  "dependencies": {
+    "better-sqlite3": "12.2.0",
+    "electron-store": "11.0.2",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "4.0.1",
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "22.17.1",
+    "@types/react": "19.1.10",
+    "@types/react-dom": "19.1.7",
+    "@vitejs/plugin-react": "5.0.0",
+    "electron": "^37.2.6",
+    "electron-builder": "26.0.12",
+    "electron-vite": "4.0.0",
+    "eslint": "9.33.0",
+    "eslint-plugin-react-hooks": "5.2.0",
+    "prettier": "3.6.2",
+    "typescript": "5.9.2",
+    "typescript-eslint": "8.39.1",
+    "vite": "7.1.2",
+    "vitest": "3.2.4"
+  },
+  "build": {
+    "appId": "com.lasttodo.app",
+    "productName": "LastTodo",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*"
+    ],
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "extraResources": [
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "npmRebuild": true,
+    "mac": {
+      "icon": "build/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility"
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis"
+      ]
+    }
+  }
+}
